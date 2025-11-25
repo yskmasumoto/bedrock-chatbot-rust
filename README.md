@@ -1,0 +1,2 @@
+# bedrock-agent-rust
+Amazon Bedrockとaws_sdk_rustを利用して簡単な対話型AIチャットボットを作りたい
