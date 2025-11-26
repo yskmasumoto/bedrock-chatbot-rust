@@ -107,13 +107,12 @@ pub async fn run_agent(
                                 is_first_event = false;
                             }
 
-                            if let ConverseStreamOutput::ContentBlockDelta(delta) = event {
-                                if let Some(delta_block) = delta.delta
-                                    && let Ok(text) = delta_block.as_text()
-                                {
-                                    print!("{}", text);
-                                    full_response_text.push_str(text);
-                                }
+                            if let ConverseStreamOutput::ContentBlockDelta(delta) = event
+                                && let Some(delta_block) = delta.delta
+                                && let Ok(text) = delta_block.as_text()
+                            {
+                                print!("{}", text);
+                                full_response_text.push_str(text);
                             }
                         }
 
