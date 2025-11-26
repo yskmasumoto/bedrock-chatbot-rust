@@ -1,0 +1,10 @@
+# .github/dependabot.yml
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # AWS SDKなどはグループ化してPRのノイズを減らす設定も有効ですが、
+    # まずは基本設定として個別に確認できるようにしています。
+    open-pull-requests-limit: 10
