@@ -45,5 +45,5 @@ applyTo: "**/*.rs"
 fn process_data(path: &Path) -> anyhow::Result<Data> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read config file: {:?}", path))?;
-    parse(content).context("Invalid file format")
+    serde_json::from_str(&content).context("Invalid file format")
 }
