@@ -11,7 +11,7 @@ assignees: ''
 - 関連ファイル: `src/`
 
 ## 変更の要件 (Requirements)
-1. text
+1. 具体的な要件を記述してください
 
 ## 入出力の例 (Example)
 - Input:
