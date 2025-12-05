@@ -43,7 +43,7 @@ applyTo: "**/*.rs"
 ```rust
 // 推奨
 fn process_data(path: &Path) -> anyhow::Result<Data> {
-    let content = fs::read_string(path)
+    let content = fs::read_to_string(path)
         .with_context(|| format!("Failed to read config file: {:?}", path))?;
     parse(content).context("Invalid file format")
 }
