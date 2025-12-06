@@ -12,7 +12,8 @@ const AGENT_NAME: &str = "Assistant";
 const LOADING_ANIMATION_INTERVAL: u64 = 200;
 const LOADING_ANIMATION_CHARACTER: &str = ".";
 // ローディングアニメーションをクリアするためのスペース文字列
-const CLEAR_LINE_SPACES: &str = "                                     ";
+// (ローディング中に表示される可能性のある最大文字数を想定: 約30-40文字分のドット)
+const CLEAR_LINE_SPACES: &str = "                                     "; // 37 spaces
 
 // CLIの引数構造体定義
 #[derive(Parser)]
@@ -104,7 +105,10 @@ async fn run_agent_cli(
                     loop {
                         sleep(Duration::from_millis(LOADING_ANIMATION_INTERVAL)).await;
                         print!("{}", LOADING_ANIMATION_CHARACTER);
-                        std::io::stdout().flush().unwrap();
+                        // エラーが発生した場合はログに記録してループを抜ける
+                        if std::io::stdout().flush().is_err() {
+                            break;
+                        }
                     }
                 });
 
@@ -117,12 +121,14 @@ async fn run_agent_cli(
                         let mut stream = response.stream;
                         let mut full_response_text = String::new();
                         let mut is_first_event = true;
+                        let mut loading_stopped = false;
 
                         // ストリーム受信ループ
                         while let Some(event) = stream.recv().await? {
                             // 最初のイベントが届いたタイミングでローディングを消す
                             if is_first_event {
                                 loading_task.abort();
+                                loading_stopped = true;
                                 clear_loading_animation();
                                 is_first_event = false;
                             }
@@ -139,7 +145,7 @@ async fn run_agent_cli(
                         }
 
                         // ストリーム終了処理
-                        if is_first_event {
+                        if !loading_stopped {
                             // イベントが一つも来ずに終了した場合もローディングを消す
                             loading_task.abort();
                             clear_loading_animation();
@@ -180,6 +186,9 @@ async fn run_agent_cli(
 ///
 /// 行頭に戻り、スペースで上書きしてから再度行頭に戻り、プロンプトを表示する。
 fn clear_loading_animation() {
-    print!("\r{} > {}\r{} > ", AGENT_NAME, CLEAR_LINE_SPACES, AGENT_NAME);
-    std::io::stdout().flush().unwrap();
+    print!(
+        "\r{} > {}\r{} > ",
+        AGENT_NAME, CLEAR_LINE_SPACES, AGENT_NAME
+    );
+    let _ = std::io::stdout().flush();
 }

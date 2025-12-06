@@ -64,6 +64,10 @@ impl AgentClient {
     /// # Note
     /// この関数はメッセージ履歴を更新します。エラーが発生した場合、
     /// 呼び出し元は `rollback_last_user_message()` を呼び出して履歴を元に戻すことができます。
+    ///
+    /// # Performance Note
+    /// この関数は会話履歴全体をクローンします。AWS SDK APIが所有権を要求するため必要です。
+    /// 長い会話では、パフォーマンスへの影響が発生する可能性があります。
     pub async fn send_message(
         &mut self,
         user_input: &str,
@@ -112,11 +116,18 @@ impl AgentClient {
     /// 最後に追加されたユーザーメッセージを履歴から削除する
     ///
     /// エラー発生時などに使用し、メッセージ履歴の整合性を保つ。
-    pub fn rollback_last_user_message(&mut self) {
+    ///
+    /// # Returns
+    /// * `true` - ユーザーメッセージが削除された
+    /// * `false` - 最後のメッセージがユーザーメッセージでないため、何も削除されなかった
+    pub fn rollback_last_user_message(&mut self) -> bool {
         if let Some(last_message) = self.messages.last()
             && matches!(last_message.role, ConversationRole::User)
         {
             self.messages.pop();
+            true
+        } else {
+            false
         }
     }
 }
