@@ -1,161 +1,116 @@
 use aws_config::meta::region::RegionProviderChain;
 use aws_config::{self, BehaviorVersion};
 use aws_sdk_bedrockruntime::Client;
-use aws_sdk_bedrockruntime::types::{
-    ContentBlock, ConversationRole, ConverseStreamOutput, Message,
-};
-use rustyline::DefaultEditor;
-use rustyline::error::ReadlineError;
-use std::io::Write;
-use std::time::Duration;
-use tokio::time::sleep;
+use aws_sdk_bedrockruntime::types::{ContentBlock, ConversationRole, Message};
+use aws_sdk_bedrockruntime::operation::converse_stream::ConverseStreamOutput as ConverseStreamResponse;
 
-// 使用するモデルID
+/// 使用するモデルID
 const MODEL_ID: &str = "anthropic.claude-3-5-sonnet-20240620-v1:0";
 
-// ローディングアニメーションの設定
-const LOADING_ANIMATION_INTERVAL: u64 = 200;
-const LOADING_ANIMATION_CHARACTER: &str = ".";
+/// Agent クライアント構造体
+/// 
+/// AWS Bedrock との通信と会話履歴を管理する純粋なビジネスロジック層。
+/// UI/UX に関する処理は含まず、再利用可能な形で提供される。
+pub struct AgentClient {
+    client: Client,
+    messages: Vec<Message>,
+}
 
-// エージェントの設定
-const USER_NAME: &str = "User";
-const AGENT_NAME: &str = "Assistant";
+impl AgentClient {
+    /// 新しい AgentClient を作成する
+    ///
+    /// # Arguments
+    /// * `profile` - 使用する AWS プロファイル名
+    /// * `region` - リージョン（オプション）。指定しない場合はデフォルトプロファイルの設定またはus-east-1を使用
+    ///
+    /// # Returns
+    /// 初期化された `AgentClient` インスタンス
+    pub async fn new(profile: String, region: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
+        let region_provider = RegionProviderChain::first_try(region.map(aws_config::Region::new))
+            .or_default_provider()
+            .or_else(aws_config::Region::new("us-east-1"));
 
-pub async fn run_agent(
-    profile: String,
-    region: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Initializing Agent with profile: {}", profile);
+        let config = aws_config::defaults(BehaviorVersion::latest())
+            .region(region_provider)
+            .profile_name(&profile)
+            .load()
+            .await;
 
-    let region_provider = RegionProviderChain::first_try(region.map(aws_config::Region::new))
-        .or_default_provider()
-        .or_else(aws_config::Region::new("us-east-1"));
+        let client = Client::new(&config);
+        
+        Ok(Self {
+            client,
+            messages: Vec::new(),
+        })
+    }
 
-    let config = aws_config::defaults(BehaviorVersion::latest())
-        .region(region_provider)
-        .profile_name(&profile)
-        .load()
-        .await;
+    /// 使用しているモデルIDを取得する
+    pub fn model_id(&self) -> &str {
+        MODEL_ID
+    }
 
-    let client = Client::new(&config);
-    let mut messages: Vec<Message> = Vec::new();
-    let mut rl = DefaultEditor::new()?;
+    /// ユーザーのメッセージを送信し、レスポンスのストリームを返す
+    ///
+    /// # Arguments
+    /// * `user_input` - ユーザーの入力テキスト
+    ///
+    /// # Returns
+    /// * `Ok(ConverseStreamResponse)` - ストリーミングレスポンス
+    /// * `Err` - エラーが発生した場合
+    ///
+    /// # Note
+    /// この関数はメッセージ履歴を更新します。エラーが発生した場合、
+    /// 呼び出し元は `rollback_last_user_message()` を呼び出して履歴を元に戻すことができます。
+    pub async fn send_message(
+        &mut self,
+        user_input: &str,
+    ) -> Result<ConverseStreamResponse, Box<dyn std::error::Error>> {
+        let user_message = Message::builder()
+            .role(ConversationRole::User)
+            .content(ContentBlock::Text(user_input.to_string()))
+            .build()
+            .map_err(|e| format!("Failed to build message: {}", e))?;
 
-    println!("Using Model: {}", MODEL_ID);
-    println!("+--------------------------------------------------+");
-    println!("| AI Agent Started. Type 'exit' or 'quit' to stop. |");
-    println!("+--------------------------------------------------+");
+        self.messages.push(user_message);
 
-    loop {
-        let readline = rl.readline(&format!("{} > ", USER_NAME));
-        match readline {
-            Ok(line) => {
-                let input = line.trim();
-                if input.is_empty() {
-                    continue;
-                }
-                if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
-                    break;
-                }
+        let response = self
+            .client
+            .converse_stream()
+            .model_id(MODEL_ID)
+            .set_messages(Some(self.messages.clone()))
+            .send()
+            .await?;
 
-                let _ = rl.add_history_entry(input);
+        Ok(response)
+    }
 
-                let user_message = Message::builder()
-                    .role(ConversationRole::User)
-                    .content(ContentBlock::Text(input.to_string()))
-                    .build()
-                    .map_err(|e| format!("Failed to build message: {}", e))?;
+    /// アシスタントのメッセージを会話履歴に追加する
+    ///
+    /// # Arguments
+    /// * `response_text` - アシスタントの完全なレスポンステキスト
+    ///
+    /// # Returns
+    /// * `Ok(())` - 成功
+    /// * `Err` - メッセージ構築に失敗した場合
+    pub fn add_assistant_message(&mut self, response_text: String) -> Result<(), Box<dyn std::error::Error>> {
+        let assistant_message = Message::builder()
+            .role(ConversationRole::Assistant)
+            .content(ContentBlock::Text(response_text))
+            .build()
+            .map_err(|e| format!("Failed to build message: {}", e))?;
 
-                messages.push(user_message);
+        self.messages.push(assistant_message);
+        Ok(())
+    }
 
-                print!("{} > ", AGENT_NAME);
-                std::io::stdout().flush()?;
-
-                // --- ローディングアニメーション開始 ---
-                let loading_task = tokio::spawn(async {
-                    loop {
-                        sleep(Duration::from_millis(LOADING_ANIMATION_INTERVAL)).await; // 更新頻度を少し上げました
-                        print!("{}", LOADING_ANIMATION_CHARACTER);
-                        std::io::stdout().flush().unwrap();
-                    }
-                });
-
-                // APIリクエスト送信（ここではまだストリームの中身は来ない）
-                let response_result = client
-                    .converse_stream()
-                    .model_id(MODEL_ID)
-                    .set_messages(Some(messages.clone()))
-                    .send()
-                    .await;
-
-                match response_result {
-                    Ok(output) => {
-                        let mut stream = output.stream;
-                        let mut full_response_text = String::new();
-                        let mut is_first_event = true; // 最初のイベント判定フラグ
-
-                        // ストリーム受信ループ
-                        while let Some(event) = stream.recv().await? {
-                            // ★修正点: 最初のイベントが届いたタイミングでローディングを消す
-                            if is_first_event {
-                                loading_task.abort();
-                                // ローディングの `...` を消してカーソルを戻す
-                                print!(
-                                    "\rAssistant >                                     \rAssistant > "
-                                );
-                                std::io::stdout().flush()?;
-                                is_first_event = false;
-                            }
-
-                            if let ConverseStreamOutput::ContentBlockDelta(delta) = event
-                                && let Some(delta_block) = delta.delta
-                                && let Ok(text) = delta_block.as_text()
-                            {
-                                print!("{}", text);
-                                full_response_text.push_str(text);
-                            }
-                        }
-
-                        // ストリーム終了処理
-                        if is_first_event {
-                            // もしイベントが一つも来ずに終了した場合（エラー等）もローディングを消す
-                            loading_task.abort();
-                            print!(
-                                "\rAssistant >                                     \rAssistant > "
-                            );
-                        }
-
-                        println!(); // 最後に改行
-
-                        let assistant_message = Message::builder()
-                            .role(ConversationRole::Assistant)
-                            .content(ContentBlock::Text(full_response_text))
-                            .build()
-                            .map_err(|e| format!("Failed to build message: {}", e))?;
-
-                        messages.push(assistant_message);
-                    }
-                    Err(e) => {
-                        loading_task.abort(); // エラー時も止める
-                        println!("\n[Error] Bedrock API call failed: {}", e);
-                        messages.pop();
-                    }
-                }
-            }
-            Err(ReadlineError::Interrupted) => {
-                println!("CTRL-C");
-                break;
-            }
-            Err(ReadlineError::Eof) => {
-                println!("CTRL-D");
-                break;
-            }
-            Err(err) => {
-                println!("Error: {:?}", err);
-                break;
+    /// 最後に追加されたユーザーメッセージを履歴から削除する
+    ///
+    /// エラー発生時などに使用し、メッセージ履歴の整合性を保つ。
+    pub fn rollback_last_user_message(&mut self) {
+        if let Some(last_message) = self.messages.last() {
+            if matches!(last_message.role, ConversationRole::User) {
+                self.messages.pop();
             }
         }
     }
-
-    Ok(())
 }
