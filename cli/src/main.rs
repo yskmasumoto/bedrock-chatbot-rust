@@ -11,6 +11,8 @@ const USER_NAME: &str = "User";
 const AGENT_NAME: &str = "Assistant";
 const LOADING_ANIMATION_INTERVAL: u64 = 200;
 const LOADING_ANIMATION_CHARACTER: &str = ".";
+// ローディングアニメーションをクリアするためのスペース文字列
+const CLEAR_LINE_SPACES: &str = "                                     ";
 
 // CLIの引数構造体定義
 #[derive(Parser)]
@@ -121,12 +123,7 @@ async fn run_agent_cli(
                             // 最初のイベントが届いたタイミングでローディングを消す
                             if is_first_event {
                                 loading_task.abort();
-                                // ローディングの `...` を消してカーソルを戻す
-                                print!(
-                                    "\r{} >                                     \r{} > ",
-                                    AGENT_NAME, AGENT_NAME
-                                );
-                                std::io::stdout().flush()?;
+                                clear_loading_animation();
                                 is_first_event = false;
                             }
 
@@ -145,10 +142,7 @@ async fn run_agent_cli(
                         if is_first_event {
                             // イベントが一つも来ずに終了した場合もローディングを消す
                             loading_task.abort();
-                            print!(
-                                "\r{} >                                     \r{} > ",
-                                AGENT_NAME, AGENT_NAME
-                            );
+                            clear_loading_animation();
                         }
 
                         println!(); // 最後に改行
@@ -180,4 +174,12 @@ async fn run_agent_cli(
     }
 
     Ok(())
+}
+
+/// ローディングアニメーションをクリアしてカーソルを戻す
+///
+/// 行頭に戻り、スペースで上書きしてから再度行頭に戻り、プロンプトを表示する。
+fn clear_loading_animation() {
+    print!("\r{} > {}\r{} > ", AGENT_NAME, CLEAR_LINE_SPACES, AGENT_NAME);
+    std::io::stdout().flush().unwrap();
 }
