@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// CLI対話型エージェントを実行する
-/// 
+///
 /// ユーザー入力の受け付け、ローディング表示、ストリーミングレスポンスの表示など、
 /// すべてのUI/UX処理を担当する。
 async fn run_agent_cli(
@@ -64,7 +64,7 @@ async fn run_agent_cli(
 
     // エージェントクライアントの初期化（ビジネスロジック層）
     let mut agent = AgentClient::new(aws_profile, region).await?;
-    
+
     // rustylineエディタの初期化（UI層）
     let mut rl = DefaultEditor::new()?;
 
@@ -79,12 +79,12 @@ async fn run_agent_cli(
         match readline {
             Ok(line) => {
                 let input = line.trim();
-                
+
                 // 空入力はスキップ
                 if input.is_empty() {
                     continue;
                 }
-                
+
                 // 終了コマンドの処理
                 if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
                     break;

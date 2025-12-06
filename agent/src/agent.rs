@@ -1,14 +1,14 @@
 use aws_config::meta::region::RegionProviderChain;
 use aws_config::{self, BehaviorVersion};
 use aws_sdk_bedrockruntime::Client;
-use aws_sdk_bedrockruntime::types::{ContentBlock, ConversationRole, Message};
 use aws_sdk_bedrockruntime::operation::converse_stream::ConverseStreamOutput as ConverseStreamResponse;
+use aws_sdk_bedrockruntime::types::{ContentBlock, ConversationRole, Message};
 
 /// 使用するモデルID
 const MODEL_ID: &str = "anthropic.claude-3-5-sonnet-20240620-v1:0";
 
 /// Agent クライアント構造体
-/// 
+///
 /// AWS Bedrock との通信と会話履歴を管理する純粋なビジネスロジック層。
 /// UI/UX に関する処理は含まず、再利用可能な形で提供される。
 pub struct AgentClient {
@@ -25,7 +25,10 @@ impl AgentClient {
     ///
     /// # Returns
     /// 初期化された `AgentClient` インスタンス
-    pub async fn new(profile: String, region: Option<String>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(
+        profile: String,
+        region: Option<String>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let region_provider = RegionProviderChain::first_try(region.map(aws_config::Region::new))
             .or_default_provider()
             .or_else(aws_config::Region::new("us-east-1"));
@@ -37,7 +40,7 @@ impl AgentClient {
             .await;
 
         let client = Client::new(&config);
-        
+
         Ok(Self {
             client,
             messages: Vec::new(),
@@ -92,7 +95,10 @@ impl AgentClient {
     /// # Returns
     /// * `Ok(())` - 成功
     /// * `Err` - メッセージ構築に失敗した場合
-    pub fn add_assistant_message(&mut self, response_text: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn add_assistant_message(
+        &mut self,
+        response_text: String,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let assistant_message = Message::builder()
             .role(ConversationRole::Assistant)
             .content(ContentBlock::Text(response_text))
@@ -107,10 +113,10 @@ impl AgentClient {
     ///
     /// エラー発生時などに使用し、メッセージ履歴の整合性を保つ。
     pub fn rollback_last_user_message(&mut self) {
-        if let Some(last_message) = self.messages.last() {
-            if matches!(last_message.role, ConversationRole::User) {
-                self.messages.pop();
-            }
+        if let Some(last_message) = self.messages.last()
+            && matches!(last_message.role, ConversationRole::User)
+        {
+            self.messages.pop();
         }
     }
 }
