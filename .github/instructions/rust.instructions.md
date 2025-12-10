@@ -33,7 +33,7 @@ applyTo: "**/*.rs"
 
 **コード例 (推奨)**:
 ```rust
-// agent/src/lib.rs
+// agent/src/agent.rs
 #[derive(thiserror::Error, Debug)]
 pub enum AgentError {
     #[error("AWS Bedrock API error: {0}")]
