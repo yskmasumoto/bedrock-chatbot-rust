@@ -6,44 +6,54 @@ applyTo: "**/*.rs"
 
 使用言語: 日本語
 
-## 1. イベントハンドリングと責務の分離 (Architecture)
+## 1. アーキテクチャと責務の分離 (Architecture)
 
-**原則**: 「入力/イベントの受け付け (Interface Layer)」と「純粋なビジネスロジック (Domain Layer)」を明確に分離する。
+**原則**: Cargo Workspace機能を利用し、`cli` (Interface) と `agent` (Logic) を明確に分離する。
 
-**推奨**:
-- **エントリーポイント (`main.rs` / ハンドラ)**:
-  - 設定の読み込み、依存関係の注入、イベントループの起動のみを担当する。
-  - 具体的な計算処理や複雑な条件分岐を記述しない。
-- **ロジック層 (Modules/Library)**:
-  - フレームワークや外部APIの型（HTTPリクエスト型やイベント型）に直接依存しない「純粋関数」や「構造体」として実装する。
-  - これにより、単体テストを容易にし、フレームワークの変更に強い構造にする。
-
-**避ける**:
-- イベントハンドラ関数内（`async fn handle_event(...)` 等）に数十行以上のロジックを直書きする。
-- データのパース、バリデーション、加工処理がハンドラ内に混在している。
-
-**レビュー観点**:
-- ファイルや関数の行数が肥大化していないか。
-- 各関数に適切なコメントが付与されているか。
-- ロジック部分が特定のフレームワーク（Web/Bot等）のコンテキスト無しでテスト可能か。
-- テストコードがローカルファイルに依存していないか（モックやスタブを使用しているか）。
-- 指摘をする際には、具体的にどの部分をどのように分離すべきか、サンプルコードを交えて説明すること。
-
+**ルール**:
+- **`cli` crate**:
+  - ユーザー入力の受け付け (`rustyline`)、コマンドライン引数の解析 (`clap`)、結果の表示のみを担当する。
+  - 複雑な条件分岐やステート管理は `agent` 側に委譲する。
+- **`agent` crate**:
+  - AWS Bedrock APIとの通信、会話履歴(`messages`)の管理を担当する。
+  - `println!` 等のUI出力を行わず、純粋にデータ(`Result<T>`)を返す設計にする。
 
 ## 2. エラーハンドリング (Error Handling)
 
-**原則**: 回復可能なエラーは `Result` 型で表現し、適切なコンテキストを付与して呼び出し元へ伝播する。
+**現状と移行方針**:
+- 現在のコードベースでは `Result<(), Box<dyn std::error::Error>>` が多用されていますが、**これは非推奨です**。
+- **AIによる修正・追加実装の際は、以下のモダンなエラーハンドリングへ積極的にリファクタリングしてください。**
 
-**推奨**:
-- **アプリケーションコード**: `anyhow::Result` 等を使用し、`.context("...")` でエラー発生時の状況（「どのファイルを読み込み中か」「何のリクエスト中か」）を付与する。
-- **ライブラリコード**: `thiserror` 等を使用し、構造化された独自エラー型を定義する。
-- **早期リターン**: ネストを深くしないために `?` 演算子を活用する。
+**推奨パターン**:
+- **アプリケーション (`cli`)**:
+  - `anyhow::Result` を使用し、`.context("...")` でエラー発生時の状況を付与する。
+  - エラーは握りつぶさず、`main` 関数まで伝播させて表示する。
+- **ライブラリ (`agent`)**:
+  - `thiserror` を使用し、ドメイン固有のエラー型（例: `AgentError::NetworkError`, `AgentError::ApiLimit`）を定義する。
 
-**コード例**:
+**コード例 (推奨)**:
 ```rust
-// 推奨
-fn process_data(path: &Path) -> anyhow::Result<Data> {
-    let content = fs::read_to_string(path)
-        .context(format!("Failed to read config file: {:?}", path))?;
-    serde_json::from_str(&content).context("Invalid file format")
+// agent/src/agent.rs
+#[derive(thiserror::Error, Debug)]
+pub enum AgentError {
+    #[error("AWS Bedrock API error: {0}")]
+    BedrockError(#[from] aws_sdk_bedrockruntime::Error),
+    #[error("Invalid input: {0}")]
+    ValidationError(String),
 }
+
+// cli/src/main.rs
+fn run() -> anyhow::Result<()> {
+    let agent = AgentClient::new().context("Failed to initialize agent")?;
+    // ...
+    Ok(())
+}
+```
+
+## 3. 非同期処理 (Async/Await)
+
+**ルール**:
+
+- `tokio::main`マクロを使用し、非同期関数内でのブロッキング操作（重い計算や`std::thread::sleep`）を避ける。
+
+- 待機が必要な場合は必ず `tokio::time::sleep` を使用する。
