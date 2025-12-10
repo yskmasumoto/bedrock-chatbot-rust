@@ -54,6 +54,6 @@ fn run() -> anyhow::Result<()> {
 
 **ルール**:
 
-- tokio::main マクロを使用し、非同期関数内でのブロッキング操作（重い計算やstd::thread::sleep）を避ける。
+- `tokio::main`マクロを使用し、非同期関数内でのブロッキング操作（重い計算や`std::thread::sleep`）を避ける。
 
-- 待機が必要な場合は必ず tokio::time::sleep を使用する。
+- 待機が必要な場合は必ず `tokio::time::sleep` を使用する。
