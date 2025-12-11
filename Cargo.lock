@@ -21,6 +21,7 @@ dependencies = [
  "anyhow",
  "aws-sdk-bedrockruntime",
  "clap",
+ "mcp",
  "rustyline",
  "tokio",
 ]

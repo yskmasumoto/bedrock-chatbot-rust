@@ -1,0 +1,26 @@
+{
+  "servers": {
+    "example-stdio-server": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/target/release/example-server"
+    },
+    "git-mcp-server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git"],
+      "env": {
+        "RUST_LOG": "info"
+      }
+    },
+    "development-server": {
+      "type": "stdio",
+      "command": "cargo",
+      "args": ["run", "--", "--debug"],
+      "env": {
+        "RUST_LOG": "debug",
+        "RUST_BACKTRACE": "1"
+      },
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}

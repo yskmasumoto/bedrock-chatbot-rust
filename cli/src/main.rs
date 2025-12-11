@@ -1,6 +1,7 @@
 use agent::AgentClient;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use mcp::{McpClient, McpConfig};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use std::io::Write;
@@ -37,6 +38,15 @@ enum Commands {
         #[arg(long)]
         region: Option<String>,
     },
+    /// MCPサーバーの情報を表示します
+    Mcp {
+        /// 特定のMCPサーバー名（省略時は全サーバーのリストを表示）
+        server_name: Option<String>,
+
+        /// mcp.jsonファイルのパス（省略時は.vscode/mcp.jsonまたはmcp.jsonを使用）
+        #[arg(long)]
+        config: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -50,6 +60,12 @@ async fn main() -> Result<()> {
             region,
         } => {
             run_agent_cli(aws_profile, region).await?;
+        }
+        Commands::Mcp {
+            server_name,
+            config,
+        } => {
+            handle_mcp_command(server_name, config).await?;
         }
     }
 
@@ -195,4 +211,140 @@ fn clear_loading_animation() {
         AGENT_NAME, CLEAR_LINE_SPACES, AGENT_NAME
     );
     let _ = std::io::stdout().flush();
+}
+
+/// MCPコマンドを処理する
+///
+/// # Arguments
+/// * `server_name` - サーバー名（Noneの場合は全サーバーのリストを表示）
+/// * `config_path` - mcp.jsonファイルのパス（Noneの場合はデフォルトパスを使用）
+async fn handle_mcp_command(
+    server_name: Option<String>,
+    config_path: Option<String>,
+) -> Result<()> {
+    // 設定ファイルを読み込む
+    let config = if let Some(path) = config_path {
+        McpConfig::load_from_file(&path)
+            .with_context(|| format!("設定ファイルの読み込みに失敗しました: {}", path))?
+    } else {
+        match McpConfig::load_default()? {
+            Some(config) => config,
+            None => {
+                println!("mcp.jsonファイルが見つかりません。");
+                println!("以下のいずれかのパスに配置してください：");
+                println!("  - .vscode/mcp.json");
+                println!("  - mcp.json");
+                return Ok(());
+            }
+        }
+    };
+
+    match server_name {
+        // サーバー名が指定された場合：そのサーバーのツール一覧を表示
+        Some(name) => {
+            show_server_tools(&config, &name).await?;
+        }
+        // サーバー名が指定されていない場合：全サーバーのリストを表示
+        None => {
+            show_server_list(&config);
+        }
+    }
+
+    Ok(())
+}
+
+/// 全MCPサーバーのリストを表示
+fn show_server_list(config: &McpConfig) {
+    if config.servers.is_empty() {
+        println!("設定されているMCPサーバーはありません。");
+        return;
+    }
+
+    println!("利用可能なMCPサーバー：");
+    println!();
+
+    for (name, server) in &config.servers {
+        println!("  📦 {}", name);
+        println!("     タイプ: {}", server.server_type);
+        println!("     コマンド: {}", server.command);
+
+        if !server.args.is_empty() {
+            println!("     引数: {}", server.args.join(" "));
+        }
+
+        if !server.env.is_empty() {
+            println!("     環境変数: {} 個", server.env.len());
+        }
+
+        println!();
+    }
+
+    println!("ツール一覧を表示するには: mcp <サーバー名>");
+    println!("例: mcp {}", config.servers.keys().next().unwrap());
+}
+
+/// 特定のMCPサーバーのツール一覧を表示
+async fn show_server_tools(config: &McpConfig, server_name: &str) -> Result<()> {
+    // サーバー設定を取得
+    let server = config
+        .get_server(server_name)
+        .with_context(|| format!("サーバー '{}' が見つかりません", server_name))?;
+
+    // stdio以外のタイプはサポート外
+    if server.server_type != "stdio" {
+        anyhow::bail!(
+            "サーバータイプ '{}' はサポートされていません。現在は'stdio'のみ対応しています。",
+            server.server_type
+        );
+    }
+
+    println!("MCPサーバー '{}' に接続中...", server_name);
+
+    // カレントディレクトリをワークスペースフォルダとして使用
+    let workspace_folder = std::env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(String::from));
+
+    let command = server.resolve_command(workspace_folder.as_deref());
+    let args = server.resolve_args(workspace_folder.as_deref());
+
+    // 引数をVec<&str>に変換
+    let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    // MCPクライアントで接続
+    let client = McpClient::new(&command, args_refs)
+        .await
+        .with_context(|| format!("MCPサーバー '{}' への接続に失敗しました", server_name))?;
+
+    // サーバー情報を表示
+    if let Some(info) = client.server_info() {
+        println!("サーバー情報:");
+        println!("  {:?}", info);
+        println!();
+    }
+
+    // ツール一覧を取得
+    println!("利用可能なツール：");
+    let tools = client
+        .list_tools()
+        .await
+        .context("ツール一覧の取得に失敗しました")?;
+
+    if tools.is_empty() {
+        println!("  （ツールなし）");
+    } else {
+        for tool in &tools {
+            println!("  🔧 {}", tool.name);
+            if let Some(description) = &tool.description {
+                println!("     説明: {}", description);
+            }
+            println!();
+        }
+        println!("合計: {} 個のツール", tools.len());
+    }
+
+    // 切断
+    client.disconnect().await?;
+
+    Ok(())
 }

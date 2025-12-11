@@ -42,6 +42,56 @@ Amazon Bedrockとaws_sdk_rustを利用した対話型AIチャットボット + M
 cargo run --bin agent-cli -- run --aws-profile your-profile-name
 ```
 
+### MCPサーバーの管理
+
+#### MCPサーバーの一覧表示
+
+```bash
+# 利用可能なMCPサーバーの一覧を表示
+cargo run --bin agent-cli -- mcp
+
+# または
+./target/release/agent-cli mcp
+```
+
+#### 特定のMCPサーバーのツール一覧表示
+
+```bash
+# 特定のサーバーが提供するツールを確認
+cargo run --bin agent-cli -- mcp <サーバー名>
+
+# 例: git-mcp-serverのツール一覧
+cargo run --bin agent-cli -- mcp git-mcp-server
+```
+
+### mcp.json設定ファイル
+
+MCPサーバーの設定は `.vscode/mcp.json` または `mcp.json` に記述します。
+
+**設定ファイル例 (`.vscode/mcp.json`):**
+
+```json
+{
+  "servers": {
+    "git-mcp-server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git"],
+      "env": {
+        "RUST_LOG": "info"
+      }
+    },
+    "my-custom-server": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/target/release/my-server",
+      "args": ["--config", "${workspaceFolder}/config.toml"]
+    }
+  }
+}
+```
+
+詳細な設定方法については [mcp/README.md](mcp/README.md) を参照してください。
+
 ### MCPサーバーとの統合（コード例）
 
 ```rust

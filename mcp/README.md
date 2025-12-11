@@ -12,6 +12,72 @@ Model Context Protocol (MCP) のRust実装クライアント。
 - ツール一覧の取得とツールの実行
 - リソースの一覧取得と読み込み
 - プロンプトの一覧取得
+- **mcp.json設定ファイルのサポート** (Visual Studio Code `.vscode/mcp.json` 形式)
+
+## mcp.json設定ファイル
+
+Visual Studio Codeの `.vscode/mcp.json` 形式に準拠した設定ファイルをサポートしています。
+
+### 設定ファイルの配置
+
+以下のいずれかの場所に配置してください：
+
+- `.vscode/mcp.json` (推奨: VS Code統合時)
+- `mcp.json` (カレントディレクトリ)
+
+### 設定ファイルの例
+
+```json
+{
+  "servers": {
+    "git-mcp-server": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git"],
+      "env": {
+        "RUST_LOG": "info"
+      }
+    },
+    "my-custom-server": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/target/release/my-server",
+      "args": ["--config", "${workspaceFolder}/config.toml"],
+      "env": {
+        "RUST_LOG": "debug",
+        "RUST_BACKTRACE": "1"
+      }
+    }
+  }
+}
+```
+
+### サポートされる設定項目
+
+- **type**: サーバータイプ（現在は `"stdio"` のみサポート）
+- **command**: 実行するコマンド
+- **args**: コマンドライン引数（オプション）
+- **env**: 環境変数（オプション）
+- **envFile**: 環境変数ファイルのパス（オプション）
+- **cwd**: 作業ディレクトリ（オプション）
+
+### 変数の展開
+
+設定ファイル内で以下の変数を使用できます：
+
+- `${workspaceFolder}`: カレントディレクトリのパスに展開されます
+
+### CLIでの使用
+
+```bash
+# 利用可能なMCPサーバーの一覧を表示
+cargo run --bin agent-cli -- mcp
+
+# 特定のサーバーのツール一覧を表示
+cargo run --bin agent-cli -- mcp git-mcp-server
+
+# カスタム設定ファイルを指定
+cargo run --bin agent-cli -- mcp --config custom-mcp.json
+```
 
 ## 使用例
 
