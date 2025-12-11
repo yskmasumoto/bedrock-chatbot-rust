@@ -85,8 +85,20 @@ cargo build
 ### テスト
 
 ```bash
-cargo test
+# 全てのテストを実行（実際のMCPサーバーは不要）
+SKIP_MCP_INTEGRATION_TEST=1 cargo test
+
+# 実際のMCPサーバーを使用した完全なテスト（uvxなどが必要）
+cargo test -- --ignored
 ```
+
+#### テスト構成
+
+- **mcp/tests/integration_test.rs**: MCPクライアントの統合テスト
+- **agent/tests/mcp_integration_test.rs**: AgentとMCPの統合テスト
+- **mcp/tests/fixtures/mock_mcp_server.sh**: テスト用モックMCPサーバー
+
+詳細は [mcp/README.md](mcp/README.md) を参照してください。
 
 ## アーキテクチャ
 

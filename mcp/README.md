@@ -107,8 +107,47 @@ pub enum McpError {
     SerializationError(serde_json::Error),
 }
 ```
-    ConnectionError(String),
-}
+
+## テスト
+
+### 基本的なテストの実行
+
+```bash
+# 全てのテストを実行（実際のMCPサーバーは不要）
+SKIP_MCP_INTEGRATION_TEST=1 cargo test
+
+# mcpクレートのテストのみ実行
+SKIP_MCP_INTEGRATION_TEST=1 cargo test --package mcp
+
+# 特定の統合テストを実行
+SKIP_MCP_INTEGRATION_TEST=1 cargo test --test integration_test
+```
+
+### 実際のMCPサーバーを使用したテスト
+
+実際のMCPサーバー（例: `uvx mcp-server-git`）がインストールされている場合、
+より完全なテストを実行できます：
+
+```bash
+# ignoredテストを含めて実行
+cargo test -- --ignored
+
+# 特定の実サーバーテストを実行
+cargo test --test integration_test real_server_tests::test_with_real_mcp_server -- --ignored
+```
+
+### テスト構成
+
+```
+mcp/
+├── tests/
+│   ├── integration_test.rs       # 統合テスト
+│   └── fixtures/                 # テスト用のフィクスチャ
+│       └── mock_mcp_server.sh    # モックMCPサーバー
+
+agent/
+└── tests/
+    └── mcp_integration_test.rs   # MCPとagentの統合テスト
 ```
 
 ## ライセンス
