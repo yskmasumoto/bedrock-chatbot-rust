@@ -36,6 +36,9 @@ pub enum McpError {
 
     #[error("Server connection error: {0}")]
     ConnectionError(String),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
 }
 
 /// ローカルMCPサーバーとの通信を管理するクライアント
@@ -125,7 +128,7 @@ impl McpClient {
             .await?;
 
         // 結果をJSON形式で返す
-        Ok(serde_json::to_value(&result).unwrap_or(Value::Null))
+        Ok(serde_json::to_value(&result)?)
     }
 
     /// 利用可能なリソースの一覧を取得する
@@ -155,7 +158,7 @@ impl McpClient {
             .await?;
 
         // 結果をJSON形式で返す
-        Ok(serde_json::to_value(&result).unwrap_or(Value::Null))
+        Ok(serde_json::to_value(&result)?)
     }
 
     /// 利用可能なプロンプトの一覧を取得する
