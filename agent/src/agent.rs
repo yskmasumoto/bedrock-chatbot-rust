@@ -3,9 +3,29 @@ use aws_config::{self, BehaviorVersion};
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::operation::converse_stream::ConverseStreamOutput as ConverseStreamResponse;
 use aws_sdk_bedrockruntime::types::{ContentBlock, ConversationRole, Message};
+use mcp::McpClient;
 
 /// 使用するモデルID
 const MODEL_ID: &str = "anthropic.claude-3-5-sonnet-20240620-v1:0";
+
+/// AgentClientのエラー型
+#[derive(thiserror::Error, Debug)]
+pub enum AgentError {
+    #[error("AWS Bedrock API error: {0}")]
+    BedrockError(String),
+
+    #[error("Message building error: {0}")]
+    MessageBuildError(String),
+
+    #[error("AWS SDK error: {0}")]
+    AwsSdkError(String),
+
+    #[error("MCP error: {0}")]
+    McpError(#[from] mcp::McpError),
+
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
+}
 
 /// Agent クライアント構造体
 ///
@@ -14,6 +34,7 @@ const MODEL_ID: &str = "anthropic.claude-3-5-sonnet-20240620-v1:0";
 pub struct AgentClient {
     client: Client,
     messages: Vec<Message>,
+    mcp_client: Option<McpClient>,
 }
 
 impl AgentClient {
@@ -28,7 +49,7 @@ impl AgentClient {
     pub async fn new(
         profile: String,
         region: Option<String>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, AgentError> {
         let region_provider = RegionProviderChain::first_try(region.map(aws_config::Region::new))
             .or_default_provider()
             .or_else(aws_config::Region::new("us-east-1"));
@@ -44,7 +65,46 @@ impl AgentClient {
         Ok(Self {
             client,
             messages: Vec::new(),
+            mcp_client: None,
         })
+    }
+
+    /// MCPサーバーに接続する
+    ///
+    /// # Arguments
+    /// * `command` - 起動するコマンド名（例: "uvx", "npx"）
+    /// * `args` - コマンド引数のベクター（例: vec!["mcp-server-git"]）
+    ///
+    /// # Returns
+    /// * `Ok(())` - 接続に成功した場合
+    /// * `Err(AgentError)` - 接続に失敗した場合
+    pub async fn connect_mcp(
+        &mut self,
+        command: &str,
+        args: Vec<&str>,
+    ) -> Result<(), AgentError> {
+        let mcp_client = McpClient::new(command, args).await?;
+        self.mcp_client = Some(mcp_client);
+        Ok(())
+    }
+
+    /// MCPサーバーが接続されているかを確認する
+    pub fn is_mcp_connected(&self) -> bool {
+        self.mcp_client.is_some()
+    }
+
+    /// MCPサーバーから利用可能なツール一覧を取得する
+    ///
+    /// # Returns
+    /// * `Ok(Vec<mcp::Tool>)` - ツール一覧
+    /// * `Err(AgentError)` - MCPが接続されていない、または取得に失敗した場合
+    pub async fn list_mcp_tools(&self) -> Result<Vec<mcp::Tool>, AgentError> {
+        match &self.mcp_client {
+            Some(client) => Ok(client.list_tools().await?),
+            None => Err(AgentError::ConfigError(
+                "MCP client is not connected".to_string(),
+            )),
+        }
     }
 
     /// 使用しているモデルIDを取得する
@@ -71,12 +131,12 @@ impl AgentClient {
     pub async fn send_message(
         &mut self,
         user_input: &str,
-    ) -> Result<ConverseStreamResponse, Box<dyn std::error::Error>> {
+    ) -> Result<ConverseStreamResponse, AgentError> {
         let user_message = Message::builder()
             .role(ConversationRole::User)
             .content(ContentBlock::Text(user_input.to_string()))
             .build()
-            .map_err(|e| format!("Failed to build message: {}", e))?;
+            .map_err(|e| AgentError::MessageBuildError(format!("Failed to build message: {}", e)))?;
 
         self.messages.push(user_message);
 
@@ -86,7 +146,8 @@ impl AgentClient {
             .model_id(MODEL_ID)
             .set_messages(Some(self.messages.clone()))
             .send()
-            .await?;
+            .await
+            .map_err(|e| AgentError::AwsSdkError(e.to_string()))?;
 
         Ok(response)
     }
@@ -102,12 +163,12 @@ impl AgentClient {
     pub fn add_assistant_message(
         &mut self,
         response_text: String,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), AgentError> {
         let assistant_message = Message::builder()
             .role(ConversationRole::Assistant)
             .content(ContentBlock::Text(response_text))
             .build()
-            .map_err(|e| format!("Failed to build message: {}", e))?;
+            .map_err(|e| AgentError::MessageBuildError(format!("Failed to build message: {}", e)))?;
 
         self.messages.push(assistant_message);
         Ok(())

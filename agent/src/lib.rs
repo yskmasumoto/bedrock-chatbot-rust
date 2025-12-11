@@ -1,3 +1,3 @@
 pub mod agent;
 
-pub use agent::AgentClient;
+pub use agent::{AgentClient, AgentError};

@@ -1,4 +1,5 @@
 use agent::AgentClient;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
@@ -39,7 +40,7 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     // 引数の解析
     let cli = Cli::parse();
 
@@ -62,14 +63,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn run_agent_cli(
     aws_profile: String,
     region: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     println!("Initializing Agent with profile: {}", aws_profile);
 
     // エージェントクライアントの初期化（ビジネスロジック層）
-    let mut agent = AgentClient::new(aws_profile, region).await?;
+    let mut agent = AgentClient::new(aws_profile, region)
+        .await
+        .context("Failed to initialize AgentClient")?;
 
     // rustylineエディタの初期化（UI層）
-    let mut rl = DefaultEditor::new()?;
+    let mut rl = DefaultEditor::new().context("Failed to initialize rustyline editor")?;
 
     println!("Using Model: {}", agent.model_id());
     println!("+--------------------------------------------------+");
@@ -124,7 +127,7 @@ async fn run_agent_cli(
                         let mut loading_stopped = false;
 
                         // ストリーム受信ループ
-                        while let Some(event) = stream.recv().await? {
+                        while let Some(event) = stream.recv().await.context("Stream receive error")? {
                             // 最初のイベントが届いたタイミングでローディングを消す
                             if is_first_event {
                                 loading_task.abort();
@@ -154,7 +157,8 @@ async fn run_agent_cli(
                         println!(); // 最後に改行
 
                         // アシスタントのメッセージを履歴に追加（ビジネスロジック層）
-                        agent.add_assistant_message(full_response_text)?;
+                        agent.add_assistant_message(full_response_text)
+                            .context("Failed to add assistant message")?;
                     }
                     Err(e) => {
                         loading_task.abort();

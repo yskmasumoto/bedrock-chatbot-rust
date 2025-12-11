@@ -9,3 +9,4 @@ tokio = { version = "^1.48.0", features = ["full"] }
 agent = { path = "../agent" }
 rustyline = "^17.0.2"
 aws-sdk-bedrockruntime = "^1.120.0"
+anyhow = "^1.0"
