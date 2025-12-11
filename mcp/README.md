@@ -19,9 +19,10 @@ Model Context Protocol (MCP) のRust実装クライアント。
 
 ```rust
 use mcp::McpClient;
+use anyhow::Result;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     // MCPサーバーに接続
     let client = McpClient::new("uvx", vec!["mcp-server-git"]).await?;
     
@@ -57,9 +58,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 use agent::AgentClient;
+use anyhow::Result;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     // エージェントを初期化
     let mut agent = AgentClient::new(
         "default".to_string(),
@@ -72,6 +74,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // MCPツール一覧を取得
     let tools = agent.list_mcp_tools().await?;
     println!("Available MCP tools: {:?}", tools);
+    
+    // 使用後は切断
+    agent.disconnect_mcp().await?;
     
     Ok(())
 }
@@ -91,13 +96,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```rust
 pub enum McpError {
     TransportError(String),
-    ProtocolError(RmcpError),
+    ProtocolError(Box<RmcpError>),  // Note: Boxed to reduce enum size
     ServiceError(ServiceError),
     InitializationError(String),
     TaskJoinError(tokio::task::JoinError),
     ToolNotFound(String),
     ResourceNotFound(String),
     InvalidArguments(String),
+    ConnectionError(String),
+    SerializationError(serde_json::Error),
+}
+```
     ConnectionError(String),
 }
 ```

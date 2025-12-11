@@ -37,6 +37,19 @@ pub struct AgentClient {
     mcp_client: Option<McpClient>,
 }
 
+impl Drop for AgentClient {
+    fn drop(&mut self) {
+        // MCPクライアントが接続されている場合は、適切にクリーンアップする
+        // disconnect()は非同期メソッドだが、Dropは同期的なため、
+        // ここでは接続が残る可能性があることをログに記録する
+        if self.mcp_client.is_some() {
+            eprintln!(
+                "Warning: AgentClient dropped with active MCP connection. Consider calling disconnect_mcp() before dropping."
+            );
+        }
+    }
+}
+
 impl AgentClient {
     /// 新しい AgentClient を作成する
     ///
@@ -75,10 +88,34 @@ impl AgentClient {
     /// # Returns
     /// * `Ok(())` - 接続に成功した場合
     /// * `Err(AgentError)` - 接続に失敗した場合
+    ///
+    /// # Note
+    /// 既に接続されている場合は、古い接続を切断してから新しい接続を確立します。
     pub async fn connect_mcp(&mut self, command: &str, args: Vec<&str>) -> Result<(), AgentError> {
+        // 既存の接続があれば切断
+        if let Some(existing_client) = self.mcp_client.take() {
+            let _ = existing_client.disconnect().await;
+        }
+
         let mcp_client = McpClient::new(command, args).await?;
         self.mcp_client = Some(mcp_client);
         Ok(())
+    }
+
+    /// MCPサーバーから切断する
+    ///
+    /// # Returns
+    /// * `Ok(())` - 切断に成功した場合
+    /// * `Err(AgentError)` - 切断に失敗した場合、または接続されていない場合
+    pub async fn disconnect_mcp(&mut self) -> Result<(), AgentError> {
+        if let Some(client) = self.mcp_client.take() {
+            client.disconnect().await?;
+            Ok(())
+        } else {
+            Err(AgentError::ConfigError(
+                "MCP client is not connected".to_string(),
+            ))
+        }
     }
 
     /// MCPサーバーが接続されているかを確認する
