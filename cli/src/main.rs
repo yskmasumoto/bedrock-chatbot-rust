@@ -60,10 +60,7 @@ async fn main() -> Result<()> {
 ///
 /// ユーザー入力の受け付け、ローディング表示、ストリーミングレスポンスの表示など、
 /// すべてのUI/UX処理を担当する。
-async fn run_agent_cli(
-    aws_profile: String,
-    region: Option<String>,
-) -> Result<()> {
+async fn run_agent_cli(aws_profile: String, region: Option<String>) -> Result<()> {
     println!("Initializing Agent with profile: {}", aws_profile);
 
     // エージェントクライアントの初期化（ビジネスロジック層）
@@ -127,7 +124,9 @@ async fn run_agent_cli(
                         let mut loading_stopped = false;
 
                         // ストリーム受信ループ
-                        while let Some(event) = stream.recv().await.context("Stream receive error")? {
+                        while let Some(event) =
+                            stream.recv().await.context("Stream receive error")?
+                        {
                             // 最初のイベントが届いたタイミングでローディングを消す
                             if is_first_event {
                                 loading_task.abort();
@@ -157,7 +156,8 @@ async fn run_agent_cli(
                         println!(); // 最後に改行
 
                         // アシスタントのメッセージを履歴に追加（ビジネスロジック層）
-                        agent.add_assistant_message(full_response_text)
+                        agent
+                            .add_assistant_message(full_response_text)
                             .context("Failed to add assistant message")?;
                     }
                     Err(e) => {

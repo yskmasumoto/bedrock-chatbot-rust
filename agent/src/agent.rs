@@ -46,10 +46,7 @@ impl AgentClient {
     ///
     /// # Returns
     /// 初期化された `AgentClient` インスタンス
-    pub async fn new(
-        profile: String,
-        region: Option<String>,
-    ) -> Result<Self, AgentError> {
+    pub async fn new(profile: String, region: Option<String>) -> Result<Self, AgentError> {
         let region_provider = RegionProviderChain::first_try(region.map(aws_config::Region::new))
             .or_default_provider()
             .or_else(aws_config::Region::new("us-east-1"));
@@ -78,11 +75,7 @@ impl AgentClient {
     /// # Returns
     /// * `Ok(())` - 接続に成功した場合
     /// * `Err(AgentError)` - 接続に失敗した場合
-    pub async fn connect_mcp(
-        &mut self,
-        command: &str,
-        args: Vec<&str>,
-    ) -> Result<(), AgentError> {
+    pub async fn connect_mcp(&mut self, command: &str, args: Vec<&str>) -> Result<(), AgentError> {
         let mcp_client = McpClient::new(command, args).await?;
         self.mcp_client = Some(mcp_client);
         Ok(())
@@ -136,7 +129,9 @@ impl AgentClient {
             .role(ConversationRole::User)
             .content(ContentBlock::Text(user_input.to_string()))
             .build()
-            .map_err(|e| AgentError::MessageBuildError(format!("Failed to build message: {}", e)))?;
+            .map_err(|e| {
+                AgentError::MessageBuildError(format!("Failed to build message: {}", e))
+            })?;
 
         self.messages.push(user_message);
 
@@ -160,15 +155,14 @@ impl AgentClient {
     /// # Returns
     /// * `Ok(())` - 成功
     /// * `Err` - メッセージ構築に失敗した場合
-    pub fn add_assistant_message(
-        &mut self,
-        response_text: String,
-    ) -> Result<(), AgentError> {
+    pub fn add_assistant_message(&mut self, response_text: String) -> Result<(), AgentError> {
         let assistant_message = Message::builder()
             .role(ConversationRole::Assistant)
             .content(ContentBlock::Text(response_text))
             .build()
-            .map_err(|e| AgentError::MessageBuildError(format!("Failed to build message: {}", e)))?;
+            .map_err(|e| {
+                AgentError::MessageBuildError(format!("Failed to build message: {}", e))
+            })?;
 
         self.messages.push(assistant_message);
         Ok(())

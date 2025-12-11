@@ -1,8 +1,8 @@
 use rmcp::{
+    RmcpError,
     model::{CallToolRequestParam, Resource, ServerInfo, Tool},
     service::{RoleClient, RunningService, ServiceError, ServiceExt},
     transport::{ConfigureCommandExt, TokioChildProcess},
-    RmcpError,
 };
 use serde_json::Value;
 use tokio::process::Command;
@@ -14,7 +14,7 @@ pub enum McpError {
     TransportError(String),
 
     #[error("MCP protocol error: {0}")]
-    ProtocolError(#[from] RmcpError),
+    ProtocolError(#[from] Box<RmcpError>),
 
     #[error("MCP service error: {0}")]
     ServiceError(#[from] ServiceError),
@@ -152,9 +152,7 @@ impl McpClient {
     pub async fn read_resource(&self, uri: String) -> Result<Value, McpError> {
         let result = self
             .client
-            .read_resource(rmcp::model::ReadResourceRequestParam {
-                uri: uri.into(),
-            })
+            .read_resource(rmcp::model::ReadResourceRequestParam { uri })
             .await?;
 
         // 結果をJSON形式で返す
