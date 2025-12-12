@@ -42,6 +42,42 @@ Amazon Bedrockとaws_sdk_rustを利用した対話型AIチャットボット + M
 cargo run --bin agent-cli -- run --aws-profile your-profile-name
 ```
 
+**会話中のMCPサーバー接続:**
+
+起動時に `.vscode/mcp.json` または `mcp.json` が存在する場合、自動的にMCP設定が読み込まれます。
+会話中に以下のコマンドを使用してMCPサーバーに接続・切断できます：
+
+```
+User > mcp git-mcp-server
+MCPサーバー 'git-mcp-server' に接続中...
+✅ MCPサーバー 'git-mcp-server' に接続しました。
+   利用可能なツール: 5 個
+     - git_status
+     - git_diff
+     - git_log
+     - git_commit
+     - git_add
+
+User > こんにちは
+Assistant > こんにちは！Git操作のサポートができます。...
+
+User > mcp another-server
+既存のMCPサーバーとの接続を切断中...
+既存のMCPサーバーとの接続を切断しました。
+MCPサーバー 'another-server' に接続中...
+✅ MCPサーバー 'another-server' に接続しました。
+
+User > quit
+MCPサーバーとの接続を切断中...
+MCPサーバーとの接続を切断しました。
+```
+
+**特徴:**
+- 起動時にmcp.jsonを自動読み込み
+- 会話中に `mcp <サーバー名>` で動的に接続・切断
+- 複数のMCPサーバーを切り替え可能（前のサーバーは自動切断）
+- 会話終了時に自動的にMCP接続をクリーンアップ
+
 ### MCPサーバーの管理
 
 #### MCPサーバーの一覧表示

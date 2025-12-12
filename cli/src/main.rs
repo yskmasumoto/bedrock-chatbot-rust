@@ -84,12 +84,33 @@ async fn run_agent_cli(aws_profile: String, region: Option<String>) -> Result<()
         .await
         .context("Failed to initialize AgentClient")?;
 
+    // mcp.json設定ファイルを読み込む（オプション）
+    let mcp_config = match McpConfig::load_default() {
+        Ok(Some(config)) => {
+            println!("MCP設定ファイルを読み込みました。");
+            println!("利用可能なMCPサーバー: {}", config.server_names().len());
+            Some(config)
+        }
+        Ok(None) => {
+            println!("MCP設定ファイルが見つかりません。MCPなしで起動します。");
+            None
+        }
+        Err(e) => {
+            println!("警告: MCP設定ファイルの読み込みに失敗しました: {}", e);
+            println!("MCPなしで起動します。");
+            None
+        }
+    };
+
     // rustylineエディタの初期化（UI層）
     let mut rl = DefaultEditor::new().context("Failed to initialize rustyline editor")?;
 
     println!("Using Model: {}", agent.model_id());
     println!("+--------------------------------------------------+");
     println!("| AI Agent Started. Type 'exit' or 'quit' to stop. |");
+    if mcp_config.is_some() {
+        println!("| MCP commands: 'mcp <server_name>' to connect    |");
+    }
     println!("+--------------------------------------------------+");
 
     loop {
@@ -107,6 +128,17 @@ async fn run_agent_cli(aws_profile: String, region: Option<String>) -> Result<()
                 // 終了コマンドの処理
                 if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
                     break;
+                }
+
+                // MCPコマンドの処理
+                if let Some(server_name) = input.strip_prefix("mcp ") {
+                    if let Some(ref config) = mcp_config {
+                        handle_mcp_connection_command(&mut agent, config, server_name.trim())
+                            .await?;
+                    } else {
+                        println!("MCP設定ファイルが読み込まれていません。");
+                    }
+                    continue;
                 }
 
                 // 履歴に追加
@@ -196,6 +228,16 @@ async fn run_agent_cli(aws_profile: String, region: Option<String>) -> Result<()
                 println!("Error: {:?}", err);
                 break;
             }
+        }
+    }
+
+    // 会話終了時のクリーンアップ：MCPサーバーとの接続を切断
+    if agent.is_mcp_connected() {
+        println!("MCPサーバーとの接続を切断中...");
+        if let Err(e) = agent.disconnect_mcp().await {
+            eprintln!("警告: MCP切断に失敗しました: {}", e);
+        } else {
+            println!("MCPサーバーとの接続を切断しました。");
         }
     }
 
@@ -345,6 +387,93 @@ async fn show_server_tools(config: &McpConfig, server_name: &str) -> Result<()> 
 
     // 切断
     client.disconnect().await?;
+
+    Ok(())
+}
+
+/// 会話中のMCPサーバー接続コマンドを処理する
+///
+/// # Arguments
+/// * `agent` - AgentClientへの可変参照
+/// * `config` - MCP設定
+/// * `server_name` - 接続するサーバー名
+async fn handle_mcp_connection_command(
+    agent: &mut AgentClient,
+    config: &McpConfig,
+    server_name: &str,
+) -> Result<()> {
+    // サーバー設定を取得
+    let server = match config.get_server(server_name) {
+        Some(s) => s,
+        None => {
+            println!("エラー: サーバー '{}' が見つかりません", server_name);
+            println!("利用可能なサーバー: {:?}", config.server_names());
+            return Ok(());
+        }
+    };
+
+    // stdio以外のタイプはサポート外
+    if server.server_type != "stdio" {
+        println!(
+            "エラー: サーバータイプ '{}' はサポートされていません。",
+            server.server_type
+        );
+        return Ok(());
+    }
+
+    // 既存の接続がある場合は切断
+    if agent.is_mcp_connected() {
+        println!("既存のMCPサーバーとの接続を切断中...");
+        agent
+            .disconnect_mcp()
+            .await
+            .context("既存のMCP接続の切断に失敗しました")?;
+        println!("既存のMCPサーバーとの接続を切断しました。");
+    }
+
+    // カレントディレクトリをワークスペースフォルダとして使用
+    let workspace_folder = std::env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(String::from));
+
+    let command = server.resolve_command(workspace_folder.as_deref());
+    let args = server.resolve_args(workspace_folder.as_deref());
+
+    println!("MCPサーバー '{}' に接続中...", server_name);
+
+    // 引数をVec<&str>に変換（ライフタイムに注意）
+    let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    // AgentClientを通じて接続
+    match agent.connect_mcp(&command, args_refs).await {
+        Ok(()) => {
+            println!("✅ MCPサーバー '{}' に接続しました。", server_name);
+
+            // ツール一覧を取得して表示
+            match agent.list_mcp_tools().await {
+                Ok(tools) => {
+                    if tools.is_empty() {
+                        println!("   利用可能なツール: なし");
+                    } else {
+                        println!("   利用可能なツール: {} 個", tools.len());
+                        for tool in tools.iter().take(5) {
+                            println!("     - {}", tool.name);
+                        }
+                        if tools.len() > 5 {
+                            println!("     ... 他 {} 個", tools.len() - 5);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("   警告: ツール一覧の取得に失敗しました: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            println!("❌ MCPサーバーへの接続に失敗しました: {}", e);
+            println!("   コマンド: {} {}", command, args.join(" "));
+        }
+    }
 
     Ok(())
 }
