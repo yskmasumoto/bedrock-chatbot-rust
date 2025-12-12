@@ -365,6 +365,30 @@ impl AgentClient {
             false
         }
     }
+
+    /// serde_json::Value を aws_smithy_types::Document に変換する
+    ///
+    /// # Arguments
+    /// * `value` - 変換元のJSON Value
+    ///
+    /// # Returns
+    /// * `Ok(Document)` - 変換されたDocument
+    /// * `Err(AgentError)` - 変換に失敗した場合
+    pub fn json_to_document(&self, value: serde_json::Value) -> Result<Document, AgentError> {
+        json_to_document(value)
+    }
+
+    /// aws_smithy_types::Document を serde_json::Value に変換する
+    ///
+    /// # Arguments
+    /// * `doc` - 変換元のDocument
+    ///
+    /// # Returns
+    /// * `Ok(serde_json::Value)` - 変換されたJSON Value
+    /// * `Err(AgentError)` - 変換に失敗した場合
+    pub fn document_to_json(&self, doc: Document) -> Result<serde_json::Value, AgentError> {
+        document_to_json(doc)
+    }
 }
 
 /// serde_json::Value を aws_smithy_types::Document に変換する
@@ -375,7 +399,7 @@ impl AgentClient {
 /// # Returns
 /// * `Ok(Document)` - 変換されたDocument
 /// * `Err(AgentError)` - 変換に失敗した場合
-fn json_to_document(value: serde_json::Value) -> Result<Document, AgentError> {
+pub fn json_to_document(value: serde_json::Value) -> Result<Document, AgentError> {
     match value {
         serde_json::Value::Null => Ok(Document::Null),
         serde_json::Value::Bool(b) => Ok(Document::Bool(b)),
@@ -418,8 +442,7 @@ fn json_to_document(value: serde_json::Value) -> Result<Document, AgentError> {
 /// # Returns
 /// * `Ok(serde_json::Value)` - 変換されたJSON Value
 /// * `Err(AgentError)` - 変換に失敗した場合
-#[allow(dead_code)]
-fn document_to_json(doc: Document) -> Result<serde_json::Value, AgentError> {
+pub fn document_to_json(doc: Document) -> Result<serde_json::Value, AgentError> {
     match doc {
         Document::Null => Ok(serde_json::Value::Null),
         Document::Bool(b) => Ok(serde_json::Value::Bool(b)),

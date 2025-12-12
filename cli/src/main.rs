@@ -520,11 +520,10 @@ async fn process_conversation_turn(
                     let input_json: serde_json::Value = serde_json::from_str(&input)
                         .context("Failed to parse tool use input as JSON")?;
 
-                    // Convert serde_json::Value to AWS Document via string
-                    // This is a workaround since direct conversion is not available
-                    let input_str = serde_json::to_string(&input_json)
-                        .context("Failed to serialize tool input")?;
-                    let input_doc = aws_smithy_types::Document::from(input_str);
+                    // Convert serde_json::Value to AWS Document using agent's utility function
+                    let input_doc = agent
+                        .json_to_document(input_json.clone())
+                        .context("Failed to convert JSON to Document")?;
 
                     let tool_use_block = ToolUseBlock::builder()
                         .tool_use_id(tool_use_id.clone())
@@ -569,10 +568,29 @@ async fn process_conversation_turn(
             if let ContentBlock::ToolUse(tool_use) = block {
                 println!("\n🔧 ツール実行中: {}...", tool_use.name());
 
-                // Note: AWS Document to serde_json conversion is complex
-                // For now, pass empty arguments as a placeholder
-                // Full implementation requires proper Document traversal or SDK with serde support
-                let arguments = None; // TODO: Convert tool_use.input() to serde_json::Map
+                // Convert AWS Document to serde_json::Value for MCP tool call
+                let input_doc = tool_use.input();
+                let arguments = match agent.document_to_json(input_doc.clone()) {
+                    Ok(json_val) => {
+                        // MCP expects arguments as a Map, extract object if present
+                        match json_val {
+                            serde_json::Value::Object(map) => Some(map),
+                            _ => {
+                                eprintln!(
+                                    "⚠️  Warning: Tool input is not an object, using empty arguments"
+                                );
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "⚠️  Warning: Failed to convert tool input: {}, using empty arguments",
+                            e
+                        );
+                        None
+                    }
+                };
 
                 // MCPツールを実行
                 match agent
