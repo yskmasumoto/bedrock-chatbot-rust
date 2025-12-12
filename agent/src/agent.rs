@@ -180,6 +180,15 @@ impl AgentClient {
                 AgentError::MessageBuildError(format!("Failed to serialize tool schema: {}", e))
             })?;
 
+            // input_schemaがnullの場合はスキップ（Bedrockはnullを受け付けない）
+            if input_schema_json.is_null() {
+                eprintln!(
+                    "[Warning] Skipping tool '{}' due to missing input_schema",
+                    mcp_tool.name
+                );
+                continue;
+            }
+
             // JSON ValueをAWS Smithy Documentに変換
             let schema_document = json_to_document(input_schema_json)?;
 
