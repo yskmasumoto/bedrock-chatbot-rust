@@ -2,7 +2,11 @@ use aws_config::meta::region::RegionProviderChain;
 use aws_config::{self, BehaviorVersion};
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::operation::converse_stream::ConverseStreamOutput as ConverseStreamResponse;
-use aws_sdk_bedrockruntime::types::{ContentBlock, ConversationRole, Message, Tool};
+use aws_sdk_bedrockruntime::types::{
+    ContentBlock, ConversationRole, Message, Tool, ToolConfiguration, ToolInputSchema,
+    ToolSpecification,
+};
+use aws_smithy_types::Document;
 use mcp::McpClient;
 
 /// 使用するモデルID
@@ -165,35 +169,31 @@ impl AgentClient {
     /// * `Vec<Tool>` - Bedrock形式のツール定義リスト
     ///
     /// # Note
-    /// This method requires AWS SDK bedrockruntime with Converse API tool support.
-    /// Currently commented out due to SDK version constraints.
-    #[allow(dead_code)]
+    /// AWS SDK bedrockruntime v1.120.0 includes full Converse API tool support.
     async fn convert_mcp_tools_to_bedrock(&self) -> Result<Vec<Tool>, AgentError> {
         let mcp_tools = self.list_mcp_tools().await?;
-        let bedrock_tools = Vec::new();
+        let mut bedrock_tools = Vec::new();
 
         for mcp_tool in mcp_tools {
-            // MCPツールのスキーマをBedrockのToolInputSchemaに変換
-            // Note: This conversion requires proper JSON Document type conversion
-            // which is available in newer SDK versions
+            // MCPツールのスキーマをJSON Valueに変換
             let input_schema_json = serde_json::to_value(&mcp_tool.input_schema).map_err(|e| {
                 AgentError::MessageBuildError(format!("Failed to serialize tool schema: {}", e))
             })?;
 
-            // For now, we'll create a placeholder - full implementation needs SDK upgrade
-            // let input_schema = ToolInputSchema::Json(...);
-            // let tool_spec = ToolSpecification::builder()
-            //     .name(mcp_tool.name.to_string())
-            //     .description(mcp_tool.description.clone().unwrap_or_default())
-            //     .input_schema(input_schema)
-            //     .build()?;
-            // bedrock_tools.push(Tool::ToolSpec(tool_spec));
+            // JSON ValueをAWS Smithy Documentに変換
+            let schema_document = json_to_document(input_schema_json)?;
 
-            // Placeholder: Store tool info for future use
-            eprintln!(
-                "Tool available: {} - {:?}",
-                mcp_tool.name, input_schema_json
-            );
+            // ToolSpecificationを構築
+            let tool_spec = ToolSpecification::builder()
+                .name(mcp_tool.name.clone())
+                .description(mcp_tool.description.clone().unwrap_or_default())
+                .input_schema(ToolInputSchema::Json(schema_document))
+                .build()
+                .map_err(|e| {
+                    AgentError::MessageBuildError(format!("Failed to build tool spec: {}", e))
+                })?;
+
+            bedrock_tools.push(Tool::ToolSpec(tool_spec));
         }
 
         Ok(bedrock_tools)
@@ -217,7 +217,7 @@ impl AgentClient {
     /// この関数はメッセージ履歴を更新します。エラーが発生した場合、
     /// 呼び出し元は `rollback_last_user_message()` を呼び出して履歴を元に戻すことができます。
     ///
-    /// MCPツール統合は今後のSDKアップグレード後に有効化予定です。
+    /// MCPサーバーに接続されている場合、ツール定義を自動的にBedrockに送信します。
     ///
     /// # Performance Note
     /// この関数は会話履歴全体をクローンします。AWS SDK APIが所有権を要求するため必要です。
@@ -236,15 +236,36 @@ impl AgentClient {
 
         self.messages.push(user_message);
 
-        let request = self
+        let mut request = self
             .client
             .converse_stream()
             .model_id(MODEL_ID)
             .set_messages(Some(self.messages.clone()));
 
-        // TODO: Tool configuration will be enabled after AWS SDK upgrade
-        // Converse API tool support requires newer SDK version
-        // See: https://docs.aws.amazon.com/bedrock/latest/userguide/tool-use.html
+        // MCP接続時は自動的にツール定義を送信
+        if self.is_mcp_connected() {
+            match self.convert_mcp_tools_to_bedrock().await {
+                Ok(tools) if !tools.is_empty() => {
+                    let tool_config = ToolConfiguration::builder()
+                        .set_tools(Some(tools))
+                        .build()
+                        .map_err(|e| {
+                            AgentError::MessageBuildError(format!(
+                                "Failed to build tool config: {}",
+                                e
+                            ))
+                        })?;
+                    request = request.tool_config(tool_config);
+                }
+                Ok(_) => {
+                    // ツールが空の場合は何もしない
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to convert MCP tools: {}", e);
+                    // ツール変換に失敗しても会話は続行
+                }
+            }
+        }
 
         let response = request
             .send()
@@ -342,6 +363,83 @@ impl AgentClient {
             true
         } else {
             false
+        }
+    }
+}
+
+/// serde_json::Value を aws_smithy_types::Document に変換する
+///
+/// # Arguments
+/// * `value` - 変換元のJSON Value
+///
+/// # Returns
+/// * `Ok(Document)` - 変換されたDocument
+/// * `Err(AgentError)` - 変換に失敗した場合
+fn json_to_document(value: serde_json::Value) -> Result<Document, AgentError> {
+    match value {
+        serde_json::Value::Null => Ok(Document::Null),
+        serde_json::Value::Bool(b) => Ok(Document::Bool(b)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                if i >= 0 {
+                    Ok(Document::Number(aws_smithy_types::Number::PosInt(i as u64)))
+                } else {
+                    Ok(Document::Number(aws_smithy_types::Number::NegInt(i)))
+                }
+            } else if let Some(f) = n.as_f64() {
+                Ok(Document::Number(aws_smithy_types::Number::Float(f)))
+            } else {
+                Err(AgentError::MessageBuildError(
+                    "Invalid number format".to_string(),
+                ))
+            }
+        }
+        serde_json::Value::String(s) => Ok(Document::String(s)),
+        serde_json::Value::Array(arr) => {
+            let docs: Result<Vec<Document>, AgentError> =
+                arr.into_iter().map(json_to_document).collect();
+            Ok(Document::Array(docs?))
+        }
+        serde_json::Value::Object(obj) => {
+            let map: Result<std::collections::HashMap<String, Document>, AgentError> = obj
+                .into_iter()
+                .map(|(k, v)| json_to_document(v).map(|d| (k, d)))
+                .collect();
+            Ok(Document::Object(map?))
+        }
+    }
+}
+
+/// aws_smithy_types::Document を serde_json::Value に変換する
+///
+/// # Arguments
+/// * `doc` - 変換元のDocument
+///
+/// # Returns
+/// * `Ok(serde_json::Value)` - 変換されたJSON Value
+/// * `Err(AgentError)` - 変換に失敗した場合
+#[allow(dead_code)]
+fn document_to_json(doc: Document) -> Result<serde_json::Value, AgentError> {
+    match doc {
+        Document::Null => Ok(serde_json::Value::Null),
+        Document::Bool(b) => Ok(serde_json::Value::Bool(b)),
+        Document::Number(n) => match n {
+            aws_smithy_types::Number::PosInt(i) => Ok(serde_json::json!(i)),
+            aws_smithy_types::Number::NegInt(i) => Ok(serde_json::json!(i)),
+            aws_smithy_types::Number::Float(f) => Ok(serde_json::json!(f)),
+        },
+        Document::String(s) => Ok(serde_json::Value::String(s)),
+        Document::Array(arr) => {
+            let values: Result<Vec<serde_json::Value>, AgentError> =
+                arr.into_iter().map(document_to_json).collect();
+            Ok(serde_json::Value::Array(values?))
+        }
+        Document::Object(obj) => {
+            let map: Result<serde_json::Map<String, serde_json::Value>, AgentError> = obj
+                .into_iter()
+                .map(|(k, v)| document_to_json(v).map(|j| (k, j)))
+                .collect();
+            Ok(serde_json::Value::Object(map?))
         }
     }
 }
