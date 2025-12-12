@@ -1,3 +1,7 @@
+> [!IMPORTANT]
+> このリポジトリでは、人間によるコーディングを原則禁止しています。
+> 人間は、README, Cargo.toml, .github配下のファイルなど、ソースコード以外の変更のみを実施してください。
+
 # bedrock-agent-rust
 
 Amazon Bedrockとaws_sdk_rustを利用した対話型AIチャットボット + Model Context Protocol (MCP) サーバー統合
@@ -14,12 +18,12 @@ Amazon Bedrockとaws_sdk_rustを利用した対話型AIチャットボット + M
   - ユーザー入力の受け付け
   - 会話の表示
   - コマンドライン引数の解析
-  
+
 - **`agent`**: ビジネスロジック層
   - AWS Bedrockとの通信
   - 会話履歴の管理
   - MCPクライアントとの統合
-  
+
 - **`mcp`**: MCP通信ライブラリ
   - ローカルMCPサーバーへの接続
   - ツール・リソース・プロンプトの取得と実行
@@ -137,14 +141,14 @@ use agent::AgentClient;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // エージェントを初期化
     let mut agent = AgentClient::new("default".to_string(), None).await?;
-    
+
     // MCPサーバーに接続（例: Git操作サーバー）
     agent.connect_mcp("uvx", vec!["mcp-server-git"]).await?;
-    
+
     // 利用可能なツールを確認
     let tools = agent.list_mcp_tools().await?;
     println!("Available tools: {:?}", tools);
-    
+
     Ok(())
 }
 ```
@@ -201,4 +205,3 @@ cargo test -- --ignored
 ## ライセンス
 
 実験的プロジェクト
-
