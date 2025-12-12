@@ -635,10 +635,10 @@ async fn process_conversation_turn(
             }
         });
 
-        // 空のユーザーメッセージを送信してBedrockにツール結果を処理させる
-        // 実際にはツール結果が既に履歴に追加されているので、それに基づいて応答する
+        // ツール結果後のフォローアップリクエストを送信
+        // 新しいユーザーメッセージは追加せず、既存の履歴（ツール結果を含む）を使用する
         let follow_up_response = agent
-            .send_message("")
+            .send_tool_result_follow_up()
             .await
             .context("Failed to send follow-up message after tool use")?;
 

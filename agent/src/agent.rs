@@ -284,6 +284,56 @@ impl AgentClient {
         Ok(response)
     }
 
+    /// ツール結果後のフォローアップリクエストを送信する
+    ///
+    /// 既存の会話履歴（ツール結果を含む）をそのまま使用してBedrockにリクエストを送信します。
+    /// 新しいユーザーメッセージは追加しません。これにより、メッセージの役割（UserとAssistant）の
+    /// 交互パターンを保持します。
+    ///
+    /// # Returns
+    /// * `Result<ConverseStreamResponse, AgentError>` - Bedrockからのストリーミングレスポンス
+    pub async fn send_tool_result_follow_up(
+        &mut self,
+    ) -> Result<ConverseStreamResponse, AgentError> {
+        let mut request = self
+            .client
+            .converse_stream()
+            .model_id(MODEL_ID)
+            .set_messages(Some(self.messages.clone()));
+
+        // MCP接続時は自動的にツール定義を送信
+        if self.is_mcp_connected() {
+            match self.convert_mcp_tools_to_bedrock().await {
+                Ok(tools) if !tools.is_empty() => {
+                    let tool_config = ToolConfiguration::builder()
+                        .set_tools(Some(tools))
+                        .build()
+                        .map_err(|e| {
+                            AgentError::MessageBuildError(format!(
+                                "Failed to build tool config: {}",
+                                e
+                            ))
+                        })?;
+                    request = request.tool_config(tool_config);
+                }
+                Ok(_) => {
+                    // ツールが空の場合は何もしない
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to convert MCP tools: {}", e);
+                    // ツール変換に失敗しても会話は続行
+                }
+            }
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| AgentError::AwsSdkError(e.to_string()))?;
+
+        Ok(response)
+    }
+
     /// アシスタントのメッセージを会話履歴に追加する
     ///
     /// # Arguments
