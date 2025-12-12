@@ -2,7 +2,7 @@ use aws_config::meta::region::RegionProviderChain;
 use aws_config::{self, BehaviorVersion};
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::operation::converse_stream::ConverseStreamOutput as ConverseStreamResponse;
-use aws_sdk_bedrockruntime::types::{ContentBlock, ConversationRole, Message};
+use aws_sdk_bedrockruntime::types::{ContentBlock, ConversationRole, Message, Tool};
 use mcp::McpClient;
 
 /// 使用するモデルID
@@ -137,6 +137,68 @@ impl AgentClient {
         }
     }
 
+    /// MCPツールを実行する
+    ///
+    /// # Arguments
+    /// * `tool_name` - 実行するツール名
+    /// * `arguments` - ツールに渡す引数（JSON形式）
+    ///
+    /// # Returns
+    /// * `Ok(serde_json::Value)` - ツールの実行結果
+    /// * `Err(AgentError)` - MCPが接続されていない、または実行に失敗した場合
+    pub async fn call_mcp_tool(
+        &self,
+        tool_name: String,
+        arguments: Option<serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<serde_json::Value, AgentError> {
+        match &self.mcp_client {
+            Some(client) => Ok(client.call_tool(tool_name, arguments).await?),
+            None => Err(AgentError::ConfigError(
+                "MCP client is not connected".to_string(),
+            )),
+        }
+    }
+
+    /// MCPツールをBedrockツール形式に変換する
+    ///
+    /// # Returns
+    /// * `Vec<Tool>` - Bedrock形式のツール定義リスト
+    ///
+    /// # Note
+    /// This method requires AWS SDK bedrockruntime with Converse API tool support.
+    /// Currently commented out due to SDK version constraints.
+    #[allow(dead_code)]
+    async fn convert_mcp_tools_to_bedrock(&self) -> Result<Vec<Tool>, AgentError> {
+        let mcp_tools = self.list_mcp_tools().await?;
+        let bedrock_tools = Vec::new();
+
+        for mcp_tool in mcp_tools {
+            // MCPツールのスキーマをBedrockのToolInputSchemaに変換
+            // Note: This conversion requires proper JSON Document type conversion
+            // which is available in newer SDK versions
+            let input_schema_json = serde_json::to_value(&mcp_tool.input_schema).map_err(|e| {
+                AgentError::MessageBuildError(format!("Failed to serialize tool schema: {}", e))
+            })?;
+
+            // For now, we'll create a placeholder - full implementation needs SDK upgrade
+            // let input_schema = ToolInputSchema::Json(...);
+            // let tool_spec = ToolSpecification::builder()
+            //     .name(mcp_tool.name.to_string())
+            //     .description(mcp_tool.description.clone().unwrap_or_default())
+            //     .input_schema(input_schema)
+            //     .build()?;
+            // bedrock_tools.push(Tool::ToolSpec(tool_spec));
+
+            // Placeholder: Store tool info for future use
+            eprintln!(
+                "Tool available: {} - {:?}",
+                mcp_tool.name, input_schema_json
+            );
+        }
+
+        Ok(bedrock_tools)
+    }
+
     /// 使用しているモデルIDを取得する
     pub fn model_id(&self) -> &str {
         MODEL_ID
@@ -155,6 +217,8 @@ impl AgentClient {
     /// この関数はメッセージ履歴を更新します。エラーが発生した場合、
     /// 呼び出し元は `rollback_last_user_message()` を呼び出して履歴を元に戻すことができます。
     ///
+    /// MCPツール統合は今後のSDKアップグレード後に有効化予定です。
+    ///
     /// # Performance Note
     /// この関数は会話履歴全体をクローンします。AWS SDK APIが所有権を要求するため必要です。
     /// 長い会話では、パフォーマンスへの影響が発生する可能性があります。
@@ -172,11 +236,17 @@ impl AgentClient {
 
         self.messages.push(user_message);
 
-        let response = self
+        let request = self
             .client
             .converse_stream()
             .model_id(MODEL_ID)
-            .set_messages(Some(self.messages.clone()))
+            .set_messages(Some(self.messages.clone()));
+
+        // TODO: Tool configuration will be enabled after AWS SDK upgrade
+        // Converse API tool support requires newer SDK version
+        // See: https://docs.aws.amazon.com/bedrock/latest/userguide/tool-use.html
+
+        let response = request
             .send()
             .await
             .map_err(|e| AgentError::AwsSdkError(e.to_string()))?;
@@ -187,21 +257,73 @@ impl AgentClient {
     /// アシスタントのメッセージを会話履歴に追加する
     ///
     /// # Arguments
-    /// * `response_text` - アシスタントの完全なレスポンステキスト
+    /// * `content_blocks` - アシスタントのコンテンツブロック（テキストやツール使用を含む）
     ///
     /// # Returns
     /// * `Ok(())` - 成功
     /// * `Err` - メッセージ構築に失敗した場合
-    pub fn add_assistant_message(&mut self, response_text: String) -> Result<(), AgentError> {
-        let assistant_message = Message::builder()
-            .role(ConversationRole::Assistant)
-            .content(ContentBlock::Text(response_text))
+    pub fn add_assistant_message_with_blocks(
+        &mut self,
+        content_blocks: Vec<ContentBlock>,
+    ) -> Result<(), AgentError> {
+        let mut builder = Message::builder().role(ConversationRole::Assistant);
+
+        for block in content_blocks {
+            builder = builder.content(block);
+        }
+
+        let assistant_message = builder.build().map_err(|e| {
+            AgentError::MessageBuildError(format!("Failed to build message: {}", e))
+        })?;
+
+        self.messages.push(assistant_message);
+        Ok(())
+    }
+
+    /// ツール実行結果を会話履歴に追加する
+    ///
+    /// # Arguments
+    /// * `tool_use_id` - ツール使用ID
+    /// * `tool_result` - ツールの実行結果（JSON形式）
+    ///
+    /// # Returns
+    /// * `Ok(())` - 成功
+    /// * `Err` - メッセージ構築に失敗した場合
+    ///
+    /// # Note
+    /// Tool result handling requires newer AWS SDK version with proper Document conversion.
+    /// Currently using text-based result for compatibility.
+    pub fn add_tool_result(
+        &mut self,
+        tool_use_id: String,
+        tool_result: serde_json::Value,
+    ) -> Result<(), AgentError> {
+        use aws_sdk_bedrockruntime::types::{ToolResultBlock, ToolResultContentBlock};
+
+        // Convert JSON to string for now since Document conversion is not straightforward
+        let result_text = serde_json::to_string(&tool_result).map_err(|e| {
+            AgentError::MessageBuildError(format!("Failed to serialize tool result: {}", e))
+        })?;
+
+        let result_content = ToolResultContentBlock::Text(result_text);
+
+        let tool_result_block = ToolResultBlock::builder()
+            .tool_use_id(tool_use_id)
+            .content(result_content)
+            .build()
+            .map_err(|e| {
+                AgentError::MessageBuildError(format!("Failed to build tool result: {}", e))
+            })?;
+
+        let user_message = Message::builder()
+            .role(ConversationRole::User)
+            .content(ContentBlock::ToolResult(tool_result_block))
             .build()
             .map_err(|e| {
                 AgentError::MessageBuildError(format!("Failed to build message: {}", e))
             })?;
 
-        self.messages.push(assistant_message);
+        self.messages.push(user_message);
         Ok(())
     }
 

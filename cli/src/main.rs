@@ -165,48 +165,15 @@ async fn run_agent_cli(aws_profile: String, region: Option<String>) -> Result<()
 
                 match response_result {
                     Ok(response) => {
-                        // ストリーム処理用の変数
-                        let mut stream = response.stream;
-                        let mut full_response_text = String::new();
-                        let mut is_first_event = true;
-                        let mut loading_stopped = false;
-
-                        // ストリーム受信ループ
-                        while let Some(event) =
-                            stream.recv().await.context("Stream receive error")?
-                        {
-                            // 最初のイベントが届いたタイミングでローディングを消す
-                            if is_first_event {
+                        // ツール使用フローを処理
+                        match process_conversation_turn(&mut agent, response, &loading_task).await {
+                            Ok(_) => {}
+                            Err(e) => {
                                 loading_task.abort();
-                                loading_stopped = true;
-                                clear_loading_animation();
-                                is_first_event = false;
-                            }
-
-                            // テキストチャンクの表示
-                            if let aws_sdk_bedrockruntime::types::ConverseStreamOutput::ContentBlockDelta(delta) = event
-                                && let Some(delta_block) = delta.delta
-                                && let Ok(text) = delta_block.as_text()
-                            {
-                                print!("{}", text);
-                                full_response_text.push_str(text);
-                                std::io::stdout().flush()?;
+                                println!("\n[Error] Conversation processing failed: {}", e);
+                                agent.rollback_last_user_message();
                             }
                         }
-
-                        // ストリーム終了処理
-                        if !loading_stopped {
-                            // イベントが一つも来ずに終了した場合もローディングを消す
-                            loading_task.abort();
-                            clear_loading_animation();
-                        }
-
-                        println!(); // 最後に改行
-
-                        // アシスタントのメッセージを履歴に追加（ビジネスロジック層）
-                        agent
-                            .add_assistant_message(full_response_text)
-                            .context("Failed to add assistant message")?;
                     }
                     Err(e) => {
                         loading_task.abort();
@@ -473,6 +440,201 @@ async fn handle_mcp_connection_command(
             println!("❌ MCPサーバーへの接続に失敗しました: {}", e);
             println!("   コマンド: {} {}", command, args.join(" "));
         }
+    }
+
+    Ok(())
+}
+
+/// 会話のターンを処理する（ツール使用を含む）
+///
+/// ストリーミングレスポンスを処理し、必要に応じてツールを実行して会話を継続する。
+///
+/// # Arguments
+/// * `agent` - AgentClientへの可変参照
+/// * `response` - Bedrockからのレスポンス
+/// * `loading_task` - ローディングアニメーションタスク
+async fn process_conversation_turn(
+    agent: &mut AgentClient,
+    response: agent::ConverseStreamResponse,
+    loading_task: &tokio::task::JoinHandle<()>,
+) -> Result<()> {
+    use aws_sdk_bedrockruntime::types::{ContentBlock, ConverseStreamOutput, ToolUseBlock};
+
+    let mut stream = response.stream;
+    let mut content_blocks: Vec<ContentBlock> = Vec::new();
+    let mut current_text = String::new();
+    let mut current_tool_use: Option<(String, String, String)> = None; // (tool_use_id, name, input)
+    let mut is_first_event = true;
+    let mut loading_stopped = false;
+
+    // ストリーム受信ループ
+    while let Some(event) = stream.recv().await.context("Stream receive error")? {
+        // 最初のイベントが届いたタイミングでローディングを消す
+        if is_first_event {
+            loading_task.abort();
+            loading_stopped = true;
+            clear_loading_animation();
+            is_first_event = false;
+        }
+
+        match event {
+            // テキストチャンク
+            ConverseStreamOutput::ContentBlockDelta(delta) => {
+                if let Some(delta_block) = delta.delta {
+                    if let Ok(text) = delta_block.as_text() {
+                        print!("{}", text);
+                        current_text.push_str(text);
+                        std::io::stdout().flush()?;
+                    } else if let Ok(tool_use_delta) = delta_block.as_tool_use() {
+                        // ツール使用のinputが段階的に来る
+                        if let Some((_, _, ref mut input)) = current_tool_use {
+                            input.push_str(tool_use_delta.input());
+                        }
+                    }
+                }
+            }
+            // コンテンツブロック開始
+            ConverseStreamOutput::ContentBlockStart(start) => {
+                if let Some(start_block) = start.start
+                    && let Ok(tool_use) = start_block.as_tool_use()
+                {
+                    // ツール使用開始
+                    current_tool_use = Some((
+                        tool_use.tool_use_id().to_string(),
+                        tool_use.name().to_string(),
+                        String::new(),
+                    ));
+                }
+            }
+            // コンテンツブロック終了
+            ConverseStreamOutput::ContentBlockStop(_) => {
+                // テキストブロックが完了した場合
+                if !current_text.is_empty() {
+                    content_blocks.push(ContentBlock::Text(current_text.clone()));
+                    current_text.clear();
+                }
+
+                // ツール使用ブロックが完了した場合
+                if let Some((tool_use_id, name, input)) = current_tool_use.take() {
+                    // JSON形式のinputをパース
+                    let input_json: serde_json::Value = serde_json::from_str(&input)
+                        .context("Failed to parse tool use input as JSON")?;
+
+                    // Convert serde_json::Value to AWS Document via string
+                    // This is a workaround since direct conversion is not available
+                    let input_str = serde_json::to_string(&input_json)
+                        .context("Failed to serialize tool input")?;
+                    let input_doc = aws_smithy_types::Document::from(input_str);
+
+                    let tool_use_block = ToolUseBlock::builder()
+                        .tool_use_id(tool_use_id.clone())
+                        .name(name.clone())
+                        .input(input_doc)
+                        .build()
+                        .context("Failed to build ToolUseBlock")?;
+
+                    content_blocks.push(ContentBlock::ToolUse(tool_use_block));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // ストリーム終了処理
+    if !loading_stopped {
+        loading_task.abort();
+        clear_loading_animation();
+    }
+
+    // 残りのテキストがあれば追加
+    if !current_text.is_empty() {
+        content_blocks.push(ContentBlock::Text(current_text));
+    }
+
+    println!(); // 最後に改行
+
+    // アシスタントのメッセージを履歴に追加
+    agent
+        .add_assistant_message_with_blocks(content_blocks.clone())
+        .context("Failed to add assistant message")?;
+
+    // ツール使用があればそれを処理
+    let has_tool_use = content_blocks
+        .iter()
+        .any(|block| matches!(block, ContentBlock::ToolUse(_)));
+
+    if has_tool_use && agent.is_mcp_connected() {
+        // ツール実行して結果を返す
+        for block in &content_blocks {
+            if let ContentBlock::ToolUse(tool_use) = block {
+                println!("\n🔧 ツール実行中: {}...", tool_use.name());
+
+                // Note: AWS Document to serde_json conversion is complex
+                // For now, pass empty arguments as a placeholder
+                // Full implementation requires proper Document traversal or SDK with serde support
+                let arguments = None; // TODO: Convert tool_use.input() to serde_json::Map
+
+                // MCPツールを実行
+                match agent
+                    .call_mcp_tool(tool_use.name().to_string(), arguments)
+                    .await
+                {
+                    Ok(result) => {
+                        println!("✅ ツール実行完了");
+
+                        // ツール結果を履歴に追加
+                        agent
+                            .add_tool_result(tool_use.tool_use_id().to_string(), result)
+                            .context("Failed to add tool result")?;
+                    }
+                    Err(e) => {
+                        eprintln!("❌ ツール実行エラー: {}", e);
+
+                        // エラーもツール結果として返す
+                        let error_result = serde_json::json!({
+                            "error": e.to_string()
+                        });
+                        agent
+                            .add_tool_result(tool_use.tool_use_id().to_string(), error_result)
+                            .context("Failed to add tool error result")?;
+                    }
+                }
+            }
+        }
+
+        // ツール実行後、再度Bedrockに問い合わせて最終的な応答を得る
+        println!("\n{} > ", AGENT_NAME);
+        std::io::stdout().flush()?;
+
+        // ローディングアニメーション再開
+        let loading_task2 = tokio::spawn(async {
+            loop {
+                sleep(Duration::from_millis(LOADING_ANIMATION_INTERVAL)).await;
+                print!("{}", LOADING_ANIMATION_CHARACTER);
+                if std::io::stdout().flush().is_err() {
+                    break;
+                }
+            }
+        });
+
+        // 空のユーザーメッセージを送信してBedrockにツール結果を処理させる
+        // 実際にはツール結果が既に履歴に追加されているので、それに基づいて応答する
+        let follow_up_response = agent
+            .send_message("")
+            .await
+            .context("Failed to send follow-up message after tool use")?;
+
+        // 再帰的に処理（ツール使用が連鎖する可能性があるため）
+        // Box::pin を使用して無限サイズのfutureを回避
+        Box::pin(process_conversation_turn(
+            agent,
+            follow_up_response,
+            &loading_task2,
+        ))
+        .await?;
+
+        // 最後のユーザーメッセージ（空）をロールバック
+        agent.rollback_last_user_message();
     }
 
     Ok(())

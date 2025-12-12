@@ -9,6 +9,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-bedrockruntime",
  "mcp",
+ "serde_json",
  "thiserror",
  "tokio",
 ]
@@ -20,9 +21,11 @@ dependencies = [
  "agent",
  "anyhow",
  "aws-sdk-bedrockruntime",
+ "aws-smithy-types",
  "clap",
  "mcp",
  "rustyline",
+ "serde_json",
  "tokio",
 ]
 
