@@ -9,7 +9,10 @@ use std::io::Write;
 use std::time::Duration;
 use tokio::time::sleep;
 
-use crate::ui::{clear_loading_animation, print_assistant_prompt, LOADING_ANIMATION_CHARACTER, LOADING_ANIMATION_INTERVAL};
+use crate::ui::{
+    LOADING_ANIMATION_CHARACTER, LOADING_ANIMATION_INTERVAL, clear_loading_animation,
+    print_assistant_prompt,
+};
 
 /// 会話のターンを処理する（ツール使用を含む）
 ///
@@ -41,7 +44,13 @@ pub async fn process_conversation_turn(
             is_first_event = false;
         }
 
-        process_stream_event(event, &mut content_blocks, &mut current_text, &mut current_tool_use, agent)?;
+        process_stream_event(
+            event,
+            &mut content_blocks,
+            &mut current_text,
+            &mut current_tool_use,
+            agent,
+        )?;
     }
 
     // ストリーム終了処理
@@ -156,7 +165,10 @@ fn build_tool_use_block(
 }
 
 /// ツール使用を処理する
-async fn process_tool_usage(agent: &mut AgentClient, content_blocks: &[ContentBlock]) -> Result<()> {
+async fn process_tool_usage(
+    agent: &mut AgentClient,
+    content_blocks: &[ContentBlock],
+) -> Result<()> {
     // ツール実行して結果を返す
     for block in content_blocks {
         if let ContentBlock::ToolUse(tool_use) = block {
@@ -178,7 +190,12 @@ async fn process_tool_usage(agent: &mut AgentClient, content_blocks: &[ContentBl
         .context("Failed to send follow-up message after tool use")?;
 
     // 再帰的に処理（ツール使用が連鎖する可能性があるため）
-    Box::pin(process_conversation_turn(agent, follow_up_response, &loading_task)).await?;
+    Box::pin(process_conversation_turn(
+        agent,
+        follow_up_response,
+        &loading_task,
+    ))
+    .await?;
 
     // 最後のユーザーメッセージ（空）をロールバック
     agent.rollback_last_user_message();

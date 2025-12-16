@@ -17,9 +17,7 @@ use aws_smithy_types::Document;
 ///
 /// # Note
 /// input_schemaがnullのツールはスキップされます（Bedrockはnullを受け付けないため）
-pub fn convert_mcp_tools_to_bedrock(
-    mcp_tools: Vec<mcp::Tool>,
-) -> Result<Vec<Tool>, AgentError> {
+pub fn convert_mcp_tools_to_bedrock(mcp_tools: Vec<mcp::Tool>) -> Result<Vec<Tool>, AgentError> {
     let mut bedrock_tools = Vec::new();
 
     for mcp_tool in mcp_tools {
@@ -94,10 +92,10 @@ mod tests {
             }
         });
         let doc = crate::agent::json_to_document(schema).unwrap();
-        
+
         let result = build_tool_specification("test_tool", "A test tool", doc);
         assert!(result.is_ok());
-        
+
         let spec = result.unwrap();
         assert_eq!(spec.name(), "test_tool");
         assert_eq!(spec.description(), Some("A test tool"));
