@@ -45,3 +45,21 @@ pub fn print_assistant_prompt() -> std::io::Result<()> {
 pub fn user_prompt() -> String {
     format!("{} > ", USER_NAME)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_user_prompt_format() {
+        assert_eq!(user_prompt(), "User > ");
+    }
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(USER_NAME, "User");
+        assert_eq!(AGENT_NAME, "Assistant");
+        assert!(LOADING_ANIMATION_INTERVAL > 0);
+        assert!(!LOADING_ANIMATION_CHARACTER.is_empty());
+    }
+}

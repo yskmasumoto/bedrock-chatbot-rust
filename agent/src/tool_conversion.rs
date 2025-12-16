@@ -73,3 +73,33 @@ fn build_tool_specification(
         .build()
         .map_err(|e| AgentError::MessageBuildError(format!("Failed to build tool spec: {}", e)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_empty_tools() {
+        let result = convert_mcp_tools_to_bedrock(vec![]);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_build_tool_specification() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "param1": {"type": "string"}
+            }
+        });
+        let doc = crate::agent::json_to_document(schema).unwrap();
+        
+        let result = build_tool_specification("test_tool", "A test tool", doc);
+        assert!(result.is_ok());
+        
+        let spec = result.unwrap();
+        assert_eq!(spec.name(), "test_tool");
+        assert_eq!(spec.description(), Some("A test tool"));
+    }
+}
