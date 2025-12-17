@@ -81,7 +81,9 @@ fn show_server_list(config: &McpConfig) {
     }
 
     println!("ツール一覧を表示するには: mcp <サーバー名>");
-    println!("例: mcp {}", config.servers.keys().next().unwrap());
+    if let Some(example_name) = config.servers.keys().next() {
+        println!("例: mcp {}", example_name);
+    }
 }
 
 /// 特定のMCPサーバーのツール一覧を表示
@@ -240,4 +242,104 @@ fn display_connected_tools(tools: &[mcp::Tool]) {
             println!("     ... 他 {} 個", tools.len() - 5);
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mcp::{McpConfig, ServerConfig};
+    use std::collections::HashMap;
+
+    fn create_test_config() -> McpConfig {
+        let mut servers = HashMap::new();
+        servers.insert(
+            "test-server".to_string(),
+            ServerConfig {
+                server_type: "stdio".to_string(),
+                command: "test-command".to_string(),
+                args: vec!["arg1".to_string(), "arg2".to_string()],
+                env: HashMap::new(),
+                env_file: None,
+                cwd: None,
+            },
+        );
+        McpConfig {
+            inputs: vec![],
+            servers,
+        }
+    }
+
+    #[test]
+    fn test_show_server_list_empty() {
+        let config = McpConfig {
+            inputs: vec![],
+            servers: HashMap::new(),
+        };
+        // Should handle empty server list gracefully without panic
+        show_server_list(&config);
+    }
+
+    #[test]
+    fn test_show_server_list_with_servers() {
+        let config = create_test_config();
+        // Should display server list without panicking
+        show_server_list(&config);
+    }
+
+    #[test]
+    fn test_show_server_list_with_multiple_servers() {
+        let mut servers = HashMap::new();
+        servers.insert(
+            "server1".to_string(),
+            ServerConfig {
+                server_type: "stdio".to_string(),
+                command: "cmd1".to_string(),
+                args: vec![],
+                env: HashMap::new(),
+                env_file: None,
+                cwd: None,
+            },
+        );
+        servers.insert(
+            "server2".to_string(),
+            ServerConfig {
+                server_type: "stdio".to_string(),
+                command: "cmd2".to_string(),
+                args: vec!["--flag".to_string()],
+                env: {
+                    let mut env = HashMap::new();
+                    env.insert("KEY".to_string(), "VALUE".to_string());
+                    env
+                },
+                env_file: None,
+                cwd: None,
+            },
+        );
+        let config = McpConfig {
+            inputs: vec![],
+            servers,
+        };
+        // Should display all servers and show example
+        show_server_list(&config);
+    }
+
+    #[test]
+    fn test_load_mcp_config_with_invalid_path() {
+        // Test that load_mcp_config handles invalid paths correctly
+        let result = load_mcp_config(Some("/nonexistent/path/to/file.json".to_string()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_mcp_config_default_behavior() {
+        // When no default config exists, should return an error
+        // This test documents the expected behavior
+        let result = load_mcp_config(None);
+        // Either succeeds if default config exists, or fails if it doesn't
+        // Both are valid behaviors depending on the environment
+        let _ = result;
+    }
+
+    // Note: display_connected_tools is tested through integration tests
+    // as it prints to stdout and requires actual Tool structures from rmcp
 }
