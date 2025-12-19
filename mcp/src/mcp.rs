@@ -8,35 +8,47 @@ use serde_json::Value;
 use tokio::process::Command;
 
 /// MCPクライアントのエラー型
+///
+/// MCP (Model Context Protocol) 通信における各種エラーを表現します。
 #[derive(thiserror::Error, Debug)]
 pub enum McpError {
+    /// トランスポート層のエラー（プロセス起動失敗等）
     #[error("MCP transport error: {0}")]
     TransportError(String),
 
+    /// MCPプロトコルレベルのエラー
     #[error("MCP protocol error: {0}")]
     ProtocolError(#[from] Box<RmcpError>),
 
+    /// MCPサービスのエラー
     #[error("MCP service error: {0}")]
     ServiceError(#[from] ServiceError),
 
+    /// クライアント初期化時のエラー
     #[error("MCP client initialization error: {0}")]
     InitializationError(String),
 
+    /// 非同期タスクのJoinエラー
     #[error("Task join error: {0}")]
     TaskJoinError(#[from] tokio::task::JoinError),
 
+    /// 指定されたツールが見つからない
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
 
+    /// 指定されたリソースが見つからない
     #[error("Resource not found: {0}")]
     ResourceNotFound(String),
 
+    /// ツールの引数が不正
     #[error("Invalid arguments: {0}")]
     InvalidArguments(String),
 
+    /// サーバーへの接続エラー
     #[error("Server connection error: {0}")]
     ConnectionError(String),
 
+    /// JSONシリアライゼーション/デシリアライゼーションエラー
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 }

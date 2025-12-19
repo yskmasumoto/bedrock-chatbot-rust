@@ -3,8 +3,7 @@ use aws_config::{self, BehaviorVersion};
 use aws_sdk_bedrockruntime::Client;
 use aws_sdk_bedrockruntime::operation::converse_stream::ConverseStreamOutput as ConverseStreamResponse;
 use aws_sdk_bedrockruntime::types::{
-    ContentBlock, ConversationRole, Message, Tool, ToolConfiguration, ToolInputSchema,
-    ToolSpecification,
+    ContentBlock, ConversationRole, Message, Tool, ToolConfiguration,
 };
 use aws_smithy_types::Document;
 use mcp::McpClient;
@@ -13,22 +12,37 @@ use mcp::McpClient;
 const MODEL_ID: &str = "anthropic.claude-3-5-sonnet-20240620-v1:0";
 
 /// AgentClientのエラー型
+///
+/// AWS Bedrockとの通信やMCP統合における各種エラーを表現します。
 #[derive(thiserror::Error, Debug)]
 pub enum AgentError {
+    /// AWS Bedrock APIからのエラーレスポンス
     #[error("AWS Bedrock API error: {0}")]
     BedrockError(String),
 
+    /// メッセージやツール定義の構築に失敗した場合
     #[error("Message building error: {0}")]
     MessageBuildError(String),
 
+    /// AWS SDKレベルのエラー（ネットワーク、認証等）
     #[error("AWS SDK error: {0}")]
     AwsSdkError(String),
 
+    /// MCP関連のエラー
     #[error("MCP error: {0}")]
     McpError(#[from] mcp::McpError),
 
+    /// 設定や初期化に関するエラー
     #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    /// 入力値の検証に失敗した場合
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+
+    /// JSONシリアライゼーション/デシリアライゼーションエラー
+    #[error("JSON processing error: {0}")]
+    JsonError(#[from] serde_json::Error),
 }
 
 /// Agent クライアント構造体
@@ -172,40 +186,7 @@ impl AgentClient {
     /// AWS SDK bedrockruntime v1.120.0 includes full Converse API tool support.
     async fn convert_mcp_tools_to_bedrock(&self) -> Result<Vec<Tool>, AgentError> {
         let mcp_tools = self.list_mcp_tools().await?;
-        let mut bedrock_tools = Vec::new();
-
-        for mcp_tool in mcp_tools {
-            // MCPツールのスキーマをJSON Valueに変換
-            let input_schema_json = serde_json::to_value(&mcp_tool.input_schema).map_err(|e| {
-                AgentError::MessageBuildError(format!("Failed to serialize tool schema: {}", e))
-            })?;
-
-            // input_schemaがnullの場合はスキップ（Bedrockはnullを受け付けない）
-            if input_schema_json.is_null() {
-                eprintln!(
-                    "[Warning] Skipping tool '{}' due to missing input_schema",
-                    mcp_tool.name
-                );
-                continue;
-            }
-
-            // JSON ValueをAWS Smithy Documentに変換
-            let schema_document = json_to_document(input_schema_json)?;
-
-            // ToolSpecificationを構築
-            let tool_spec = ToolSpecification::builder()
-                .name(mcp_tool.name.clone())
-                .description(mcp_tool.description.clone().unwrap_or_default())
-                .input_schema(ToolInputSchema::Json(schema_document))
-                .build()
-                .map_err(|e| {
-                    AgentError::MessageBuildError(format!("Failed to build tool spec: {}", e))
-                })?;
-
-            bedrock_tools.push(Tool::ToolSpec(tool_spec));
-        }
-
-        Ok(bedrock_tools)
+        crate::tool_conversion::convert_mcp_tools_to_bedrock(mcp_tools)
     }
 
     /// 使用しているモデルIDを取得する
@@ -458,6 +439,14 @@ impl AgentClient {
 /// # Returns
 /// * `Ok(Document)` - 変換されたDocument
 /// * `Err(AgentError)` - 変換に失敗した場合
+///
+/// # Examples
+/// ```
+/// # use agent::agent::json_to_document;
+/// # use serde_json::json;
+/// let value = json!({"key": "value"});
+/// let doc = json_to_document(value).unwrap();
+/// ```
 pub fn json_to_document(value: serde_json::Value) -> Result<Document, AgentError> {
     match value {
         serde_json::Value::Null => Ok(Document::Null),
@@ -472,9 +461,10 @@ pub fn json_to_document(value: serde_json::Value) -> Result<Document, AgentError
             } else if let Some(f) = n.as_f64() {
                 Ok(Document::Number(aws_smithy_types::Number::Float(f)))
             } else {
-                Err(AgentError::MessageBuildError(
-                    "Invalid number format".to_string(),
-                ))
+                Err(AgentError::ValidationError(format!(
+                    "Unsupported number format: {}",
+                    n
+                )))
             }
         }
         serde_json::Value::String(s) => Ok(Document::String(s)),
