@@ -46,7 +46,7 @@ fn load_mcp_config(config_path: Option<String>) -> Result<McpConfig> {
             None => {
                 println!("mcp.jsonファイルが見つかりません。");
                 println!("以下のいずれかのパスに配置してください：");
-                println!("  - .vscode/mcp.json");
+                println!("  - .chatbot/mcp.json");
                 println!("  - mcp.json");
                 anyhow::bail!("MCP設定ファイルが見つかりません")
             }
