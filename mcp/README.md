@@ -12,17 +12,18 @@ Model Context Protocol (MCP) のRust実装クライアント。
 - ツール一覧の取得とツールの実行
 - リソースの一覧取得と読み込み
 - プロンプトの一覧取得
-- **mcp.json設定ファイルのサポート** (Visual Studio Code `.vscode/mcp.json` 形式)
+- **mcp.json設定ファイルのサポート** (`.chatbot/mcp.json` 形式、Visual Studio Code `.vscode/mcp.json` 形式との互換性を保持)
 
 ## mcp.json設定ファイル
 
-Visual Studio Codeの `.vscode/mcp.json` 形式に準拠した設定ファイルをサポートしています。
+`.chatbot/mcp.json` 形式の設定ファイルをサポートしています。
+Visual Studio Codeの `.vscode/mcp.json` 形式との互換性を保持しています。
 
 ### 設定ファイルの配置
 
 以下のいずれかの場所に配置してください：
 
-- `.vscode/mcp.json` (推奨: VS Code統合時)
+- `.chatbot/mcp.json` (推奨: デフォルトの配置場所)
 - `mcp.json` (カレントディレクトリ)
 
 ### 設定ファイルの例

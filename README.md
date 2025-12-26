@@ -48,7 +48,7 @@ cargo run --bin agent-cli -- run --aws-profile your-profile-name
 
 **会話中のMCPサーバー接続:**
 
-起動時に `.vscode/mcp.json` または `mcp.json` が存在する場合、自動的にMCP設定が読み込まれます。
+起動時に `.chatbot/mcp.json` または `mcp.json` が存在する場合、自動的にMCP設定が読み込まれます。
 会話中に以下のコマンドを使用してMCPサーバーに接続・切断できます：
 
 ```
@@ -106,9 +106,9 @@ cargo run --bin agent-cli -- mcp git-mcp-server
 
 ### mcp.json設定ファイル
 
-MCPサーバーの設定は `.vscode/mcp.json` または `mcp.json` に記述します。
+MCPサーバーの設定は `.chatbot/mcp.json` または `mcp.json` に記述します。
 
-**設定ファイル例 (`.vscode/mcp.json`):**
+**設定ファイル例 (`.chatbot/mcp.json`):**
 
 ```json
 {

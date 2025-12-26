@@ -1,7 +1,7 @@
 /// mcp.json設定ファイルの構造体定義
 ///
-/// Visual Studio Codeの`.vscode/mcp.json`仕様に準拠した
-/// MCP設定ファイルのパースと管理機能を提供します。
+/// `.chatbot/mcp.json`形式のMCP設定ファイルのパースと管理機能を提供します。
+/// Visual Studio Codeの`.vscode/mcp.json`仕様との互換性を保持しています。
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -88,12 +88,12 @@ impl McpConfig {
     /// デフォルトの設定ファイルパスを取得
     ///
     /// 以下の順序で検索：
-    /// 1. `.vscode/mcp.json`（VS Code規約）
+    /// 1. `.chatbot/mcp.json`（推奨）
     /// 2. `mcp.json`（カレントディレクトリ）
     pub fn default_path() -> Option<PathBuf> {
-        let vscode_path = PathBuf::from(".vscode/mcp.json");
-        if vscode_path.exists() {
-            return Some(vscode_path);
+        let chatbot_path = PathBuf::from(".chatbot/mcp.json");
+        if chatbot_path.exists() {
+            return Some(chatbot_path);
         }
 
         let current_path = PathBuf::from("mcp.json");
